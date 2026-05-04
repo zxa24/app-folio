@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <script>
+    (function () {
+      var key = "translator_app.theme_mode";
+      var mode = "system";
+      var effective = "light";
+      var mq;
+      try {
+        mode = localStorage.getItem(key) || "system";
+      } catch (e) {}
+      if (mode !== "system" && mode !== "light" && mode !== "dark") {
+        mode = "system";
+      }
+      if (mode === "system") {
+        mq = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+        effective = mq && mq.matches ? "dark" : "light";
+      } else {
+        effective = mode;
+      }
+      document.documentElement.setAttribute("data-theme-mode", mode);
+      document.documentElement.setAttribute("data-theme-effective", effective);
+    })();
+  </script>
+  <title>Translator MVP</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="left-actions">
+      <label class="btn primary" for="packageInput">Open Package Folder</label>
+      <input id="packageInput" type="file" webkitdirectory directory multiple />
+      <label class="btn" for="progressInput">Load Progress JSON</label>
+      <input id="progressInput" type="file" accept=".json,application/json" />
+      <div class="translate-dropdown-wrap">
+        <button id="autoTranslateBtn" class="btn translate-btn" type="button">
+          <span class="translate-icon">&#x1F310;</span>
+          <span id="translateBtnLabel">Auto Translate</span>
+          <span class="dropdown-arrow">&#x25BC;</span>
+        </button>
+        <div id="translateDropdown" class="translate-dropdown hidden">
+          <button type="button" class="translate-option" data-direction="en-zh">English → 简体中文</button>
+          <button type="button" class="translate-option" data-direction="zh-en">简体中文 → English</button>
+          <div class="translate-divider"></div>
+          <button type="button" class="translate-option" data-action="config">
+            <span class="config-icon">&#x2699;</span>
+            Advanced Settings
+          </button>
+        </div>
+      </div>
+      <button id="saveAllBtn" class="btn success" disabled>Save Outputs</button>
+      <button id="exportPdfBtn" class="btn" disabled>Export PDF</button>
+      <button id="drawHotspotBtn" class="btn" disabled>Draw Hotspot</button>
+    </div>
+    <div class="right-actions">
+      <button id="themeModeBtn" class="btn tiny" type="button">Theme: System</button>
+      <div id="packageStatus" class="status">No package loaded</div>
+    </div>
+  </header>
+
+  <main class="main-layout">
+    <section class="pdf-panel">
+      <div class="panel-head">
+        <h2>PDF Preview + Hotspots</h2>
+        <div class="page-controls">
+          <button id="prevPageBtn" class="btn tiny">Prev</button>
+          <span id="pageLabel">Page - / -</span>
+          <label class="zoom-wrap" for="zoomPercentInput">
+            <input id="zoomPercentInput" class="tiny-zoom" type="number" min="25" max="400" step="5" value="100" />
+            <span>%</span>
+          </label>
+          <button id="nextPageBtn" class="btn tiny">Next</button>
+        </div>
+      </div>
+
+      <div id="pdfStage" class="pdf-stage">
+        <canvas id="pdfCanvas" class="pdf-canvas" aria-label="PDF page preview"></canvas>
+        <div id="hotspotLayer" class="hotspot-layer"></div>
+        <div id="emptyPdfHint" class="empty-hint">
+          Open a translation package folder to load `preview.pdf` and `segments.json`.
+        </div>
+      </div>
+    </section>
+
+    <section class="right-panel">
+      <div class="tab-head">
+        <button id="segmentsTabBtn" class="tab-btn active">Segments</button>
+        <button id="aiTabBtn" class="tab-btn">AI Handoff</button>
+      </div>
+
+      <div id="segmentsTab" class="tab-content active">
+        <div class="filters">
+          <input id="searchInput" type="text" placeholder="Search source/target/tid..." />
+          <select id="editorViewMode">
+            <option value="page_cards">Card(Current Page)</option>
+            <option value="classic">Classic</option>
+          </select>
+          <select id="pageFilter"></select>
+          <select id="styleFilter"></select>
+          <div class="text-filter-wrap">
+            <button id="textFilterBtn" type="button" class="btn tiny">Card Options</button>
+            <div id="textFilterPanel" class="text-filter-panel hidden">
+              <label class="switch-row" for="filterHiddenObjects">
+                <span>Hide hidden objects</span>
+                <span class="switch">
+                  <input id="filterHiddenObjects" type="checkbox" />
+                  <span class="slider"></span>
+                </span>
+              </label>
+              <label class="switch-row" for="filterSimpleText">
+                <span>Filter number/punctuation/whitespace</span>
+                <span class="switch">
+                  <input id="filterSimpleText" type="checkbox" />
+                  <span class="slider"></span>
+                </span>
+              </label>
+              <label class="switch-row" for="filterEmptySource">
+                <span>Hide empty source paragraphs</span>
+                <span class="switch">
+                  <input id="filterEmptySource" type="checkbox" />
+                  <span class="slider"></span>
+                </span>
+              </label>
+              <label class="switch-row" for="formatAwareSoftBreakMerge" title="Soft-break sub-segments only auto-merge when font / weight / size / color match on both sides. Default ON to align with InDesign import.">
+                <span>Format-aware soft-break merge</span>
+                <span class="switch">
+                  <input id="formatAwareSoftBreakMerge" type="checkbox" />
+                  <span class="slider"></span>
+                </span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div id="segmentsSummary" class="summary">Segments: 0</div>
+        <div id="cardsView" class="cards-view"></div>
+
+        <div id="classicView" class="classic-view hidden">
+          <div id="segmentList" class="segment-list"></div>
+
+          <div class="editor">
+            <h3>Segment Editor</h3>
+            <div id="editorEmpty" class="muted">Select a segment from list or hotspot.</div>
+
+            <div id="editorFields" class="editor-fields hidden">
+              <label>TID</label>
+              <input id="tidInput" type="text" readonly />
+
+              <label>Source</label>
+              <textarea id="sourceInput" rows="4" readonly></textarea>
+
+              <label>Target</label>
+              <textarea id="targetInput" rows="5"></textarea>
+
+              <div class="inline-2">
+                <div>
+                  <label>Status</label>
+                  <select id="statusInput">
+                    <option value="todo">todo</option>
+                    <option value="translated">translated</option>
+                    <option value="reviewed">reviewed</option>
+                    <option value="skip">skip</option>
+                    <option value="merge_tail" disabled>merge_tail</option>
+                  </select>
+                </div>
+                <div>
+                  <label>Notes</label>
+                  <input id="notesInput" type="text" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="aiTab" class="tab-content">
+        <div class="summary" id="aiSummary">AI handoff rows: 0</div>
+        <div id="aiList" class="ai-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="./vendor/pdf.min.js"></script>
+  <script src="./vendor/jspdf.umd.min.js"></script>
+  <!-- Embedded Simplified Chinese fonts (base64). Loaded via <script> so PDF
+       export works under file:// where fetch/XHR of local binaries is blocked.
+       Generated by vendor/build_font_embed.js (~14 MB each). -->
+  <script src="./vendor/NotoSansSC-Regular.font.js"></script>
+  <script src="./vendor/NotoSansSC-Bold.font.js"></script>
+  <!-- Phase 7-SC: DOM-driven measurement module. Must load before app.js. -->
+  <script src="./lib/dom_text_measure.js"></script>
+  <!-- Phase 8B+8C: format-paint scaffolding (renders source emphasis + suggests target) -->
+  <script src="./lib/emphasis_overlay.js"></script>
+  <script src="./app.js"></script>
+  <script src="./dev_translate.js"></script>
+</body>
+</html>

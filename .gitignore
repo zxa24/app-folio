@@ -1,6 +1,57 @@
-# Allowlist mode: ignore everything, then re-include the files
-# that belong to the published GitHub Pages site.
-*
-!.gitignore
-!README.md
-!Workflow.html
+# === OS / IDE / sync ===
+.DS_Store
+Thumbs.db
+desktop.ini
+.claude/
+.stfolder/
+.stfolder.*
+.scratch/
+*.ffs_db
+*.sync-conflict-*
+
+# === Internal / dev (kept locally, never published) ===
+mac.txt
+CHANGELOG.md
+TEST_CHECKLIST.md
+dev/
+**/dev/
+
+# === Internal docs (historical/design notes) ===
+docs/manual_hotspot_plan.md
+docs/source_emphasis_rendering.md
+
+# === Tests (contain customer-name fixtures) ===
+tests/
+
+# === Logs / cache / packaging ===
+*.log
+*.zip
+__pycache__/
+*.pyc
+*.pyo
+node_modules/
+
+# === Probe / scratchpad scripts ===
+probe_*.js
+*_probe.js
+debug_*.js
+
+# === Binary assets not currently used by webapp ===
+# (vendor/ fonts intentionally NOT ignored — webapp depends on them)
+*.indd
+*.idml
+*.ai
+*.psd
+
+# === Customer data leakage guards ===
+*BMO*
+*MKD-*
+26-0304*
+25-1147*
+2025_09_23*
+*Edward_Jones*
+*Estate_Protector*
+*Whole_Lofe*
+*Whole_Life_*
+*Premium_Plan_Feature*
+*translation_package_2026*
