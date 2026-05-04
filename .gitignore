@@ -1,0 +1,6 @@
+# Allowlist mode: ignore everything, then re-include the files
+# that belong to the published GitHub Pages site.
+*
+!.gitignore
+!README.md
+!Workflow.html
