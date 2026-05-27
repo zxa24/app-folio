@@ -1,0 +1,25 @@
+{
+  "schema_version": "translation-mvp-1",
+  "document_name": "min.indd",
+  "stats": {
+    "paragraphs_with_emphasis": 0,
+    "emphasis_run_total": 0,
+    "script_by_font": {
+      "detected": 0,
+      "skipped": 0,
+      "deferredToEmphasis": 0,
+      "ids": []
+    },
+    "phase_8b": {
+      "processed": 0,
+      "skippedScriptByFont": 0,
+      "skippedNoRanges": 0,
+      "skippedAlreadyExtracted": 0,
+      "runsEmphasisTotal": 0,
+      "runsSkippedExistingCharStyleTotal": 0,
+      "targetLanguageOverrideCount": 0
+    },
+    "extracted_at": "export"
+  },
+  "paragraphs": []
+}

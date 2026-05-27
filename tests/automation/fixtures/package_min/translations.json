@@ -1,0 +1,59 @@
+{
+  "schema_version": "translation-mvp-1",
+  "document_name": "min.indd",
+  "translations": [
+    {
+      "tid": "tid_test_000001",
+      "source_text": "Sample source 1",
+      "target_text": "你好世界示例文本测试",
+      "status": "translated",
+      "notes": "",
+      "annotations": [
+        {
+          "action": "bold",
+          "offset": 0,
+          "length": 2
+        },
+        {
+          "action": "italic",
+          "offset": 2,
+          "length": 2
+        },
+        {
+          "action": "color",
+          "offset": 4,
+          "length": 2,
+          "color": "#cc0000"
+        },
+        {
+          "action": "comment",
+          "offset": 6,
+          "length": 2,
+          "content": "test comment"
+        }
+      ]
+    },
+    {
+      "tid": "tid_test_000002",
+      "source_text": "Sample source 2",
+      "target_text": "段落含上标符号标记",
+      "status": "translated",
+      "notes": "",
+      "annotations": [
+        {
+          "action": "superscript",
+          "offset": 4,
+          "length": 1
+        }
+      ]
+    },
+    {
+      "tid": "tid_test_000003",
+      "source_text": "Sample source 3",
+      "target_text": "普通段落无标注",
+      "status": "translated",
+      "notes": "",
+      "annotations": []
+    }
+  ]
+}

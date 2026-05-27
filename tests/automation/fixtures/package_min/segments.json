@@ -1,0 +1,454 @@
+{
+  "schema_version": "translation-mvp-1",
+  "document": {
+    "name": "min.indd",
+    "page_count": 1,
+    "exported_at_utc": "2026-05-27T14:54:06.546Z",
+    "export_script_rev": "2026-02-24-table-cells-v7",
+    "package_name": "min_translation_package_20260527_105406",
+    "tid_total": 3,
+    "tid_fallback": 3,
+    "tid_fallback_ratio": 1,
+    "geometry_version": "line_rects_norm_v1",
+    "tid_map_file": "tid_map.json",
+    "idml_backup_file": "min.idml",
+    "page_rect_coord_modes": {
+      "0": "spread"
+    },
+    "page_rect_coord_mode_stats": {
+      "spread": 1,
+      "local": 0
+    },
+    "table_probe": {
+      "tables_seen": 0,
+      "cells_seen": 0,
+      "cell_paragraphs_seen": 0,
+      "table_meta_invalid": 0,
+      "table_segments_added": 0,
+      "table_segments_updated": 0,
+      "table_segments_skipped": 0
+    },
+    "page_geometries": [
+      {
+        "page_index": 0,
+        "x0": 0,
+        "y0": 0,
+        "x1": 595.27,
+        "y1": 841.8800000000001
+      },
+      {
+        "page_index": 1,
+        "is_master_page": true,
+        "x0": 0,
+        "y0": 0,
+        "x1": 595.27,
+        "y1": 841.8800000000001
+      },
+      {
+        "page_index": 2,
+        "is_master_page": true,
+        "x0": 595.27,
+        "y0": 0,
+        "x1": 1190.54,
+        "y1": 841.8800000000001
+      }
+    ],
+    "master_page_map": [
+      {
+        "spread_name": "A-Parent",
+        "page_offset": 0,
+        "virtual_index": 1
+      },
+      {
+        "spread_name": "A-Parent",
+        "page_offset": 1,
+        "virtual_index": 2
+      }
+    ],
+    "master_pdf_pages": [
+      {
+        "spread_name": "A-Parent",
+        "page_offset": 0,
+        "pdf_page_index": 1,
+        "virtual_index": 1
+      },
+      {
+        "spread_name": "A-Parent",
+        "page_offset": 1,
+        "pdf_page_index": 2,
+        "virtual_index": 2
+      }
+    ],
+    "emphasis_stats": {
+      "paragraphs_with_emphasis": 0,
+      "emphasis_run_total": 0,
+      "script_by_font": {
+        "detected": 0,
+        "skipped": 0,
+        "deferredToEmphasis": 0,
+        "ids": []
+      },
+      "phase_8b": {
+        "processed": 0,
+        "skippedScriptByFont": 0,
+        "skippedNoRanges": 0,
+        "skippedAlreadyExtracted": 0,
+        "runsEmphasisTotal": 0,
+        "runsSkippedExistingCharStyleTotal": 0,
+        "targetLanguageOverrideCount": 0
+      },
+      "extracted_at": "export"
+    },
+    "tid_map_rows": 3,
+    "tid_map_fallback_rows": 3
+  },
+  "manual_handoff": {
+    "ai_handoff_marked": true,
+    "ai_rows": 0,
+    "ai_items": []
+  },
+  "segments": [
+    {
+      "tid": "tid_test_000001",
+      "story_id": 232,
+      "paragraph_index": 0,
+      "paragraph_uid": -1,
+      "source_text": "Sample source 1",
+      "segment_kind": "text",
+      "translatable": true,
+      "target_policy": "translate",
+      "paragraph_style": "[Basic Paragraph]",
+      "page_indexes": [
+        0
+      ],
+      "line_rects": [
+        {
+          "page_index": 0,
+          "x0": 239.99999999999795,
+          "y0": 239.99999999999773,
+          "x1": 337.97460937499795,
+          "y1": 252.57385253906023
+        }
+      ],
+      "line_rects_norm": [
+        {
+          "page_index": 0,
+          "nx0": 0.403178389638312,
+          "ny0": 0.2850762578989852,
+          "nx1": 0.5677669114435432,
+          "ny1": 0.300011703020692
+        }
+      ],
+      "point_size": 12,
+      "leading_pt": 0,
+      "leading_ratio": 1.2,
+      "leading_auto": true,
+      "inline_styles": [],
+      "format_snapshot": {
+        "uniform": true,
+        "baseline": {
+          "fontFamily": "Microsoft YaHei",
+          "fontStyle": "Regular",
+          "fontSize": 12,
+          "fillColor": {
+            "swatch": "Black",
+            "space": "CMYK",
+            "values": [
+              0,
+              0,
+              0,
+              100
+            ],
+            "displayedRGB": null
+          },
+          "underline": false,
+          "underlineOffset": -9999,
+          "underlineWeight": -9999,
+          "underlineColor": null,
+          "underlineTint": -1,
+          "strikeThrough": false,
+          "tracking": 0,
+          "baseline_shift": 0,
+          "horizontal_scale": 100,
+          "vertical_scale": 100,
+          "skew": 0,
+          "position": "NORMAL"
+        },
+        "runs": []
+      },
+      "paragraph_snapshot": {
+        "justification": "LEFT_ALIGN",
+        "leading": "AUTO",
+        "auto_leading": 120,
+        "space_before": 0,
+        "space_after": 0,
+        "first_line_indent": 0,
+        "left_indent": 0,
+        "right_indent": 0,
+        "bullets_and_numbering_type": "NO_LIST",
+        "numbering_format": "1, 2, 3, 4...",
+        "numbering_start_at": 1,
+        "bullet_char": null,
+        "tab_stops": [],
+        "keep_with_next": 0,
+        "keep_lines_together": false,
+        "keep_first_lines": 2,
+        "keep_last_lines": 2,
+        "hyphenation": true,
+        "hyphenate_capitalized_words": true,
+        "hyphen_zone": 0,
+        "hyphenate_ladder_limit": 3,
+        "composer": "Adobe Paragraph Composer",
+        "rule_above": {
+          "active": false
+        },
+        "rule_below": {
+          "active": false
+        },
+        "drop_cap_lines": 0,
+        "drop_cap_characters": 0,
+        "mojikumi_table": null,
+        "kinsoku_set": null,
+        "balance_ragged_lines": true,
+        "kanji_word_spacing": 100,
+        "cjk_grid_tracking": false,
+        "glyph_form": "NONE",
+        "single_word_justification": "FULLY_JUSTIFIED",
+        "kashidas": true,
+        "kerning_for_japanese": true
+      },
+      "source_hash": "38aecd29",
+      "is_hidden_object": false,
+      "hidden_reason": "",
+      "source_links": []
+    },
+    {
+      "tid": "tid_test_000002",
+      "story_id": 232,
+      "paragraph_index": 1,
+      "paragraph_uid": -1,
+      "source_text": "Sample source 2",
+      "segment_kind": "text",
+      "translatable": true,
+      "target_policy": "translate",
+      "paragraph_style": "[Basic Paragraph]",
+      "page_indexes": [
+        0
+      ],
+      "line_rects": [
+        {
+          "page_index": 0,
+          "x0": 239.99999999999795,
+          "y0": 254.3999999999977,
+          "x1": 337.97460937499795,
+          "y1": 266.9738525390602
+        }
+      ],
+      "line_rects_norm": [
+        {
+          "page_index": 0,
+          "nx0": 0.403178389638312,
+          "ny0": 0.3021808333729245,
+          "nx1": 0.5677669114435432,
+          "ny1": 0.31711627849463125
+        }
+      ],
+      "point_size": 12,
+      "leading_pt": 0,
+      "leading_ratio": 1.2,
+      "leading_auto": true,
+      "inline_styles": [],
+      "format_snapshot": {
+        "uniform": true,
+        "baseline": {
+          "fontFamily": "Microsoft YaHei",
+          "fontStyle": "Regular",
+          "fontSize": 12,
+          "fillColor": {
+            "swatch": "Black",
+            "space": "CMYK",
+            "values": [
+              0,
+              0,
+              0,
+              100
+            ],
+            "displayedRGB": null
+          },
+          "underline": false,
+          "underlineOffset": -9999,
+          "underlineWeight": -9999,
+          "underlineColor": null,
+          "underlineTint": -1,
+          "strikeThrough": false,
+          "tracking": 0,
+          "baseline_shift": 0,
+          "horizontal_scale": 100,
+          "vertical_scale": 100,
+          "skew": 0,
+          "position": "NORMAL"
+        },
+        "runs": []
+      },
+      "paragraph_snapshot": {
+        "justification": "LEFT_ALIGN",
+        "leading": "AUTO",
+        "auto_leading": 120,
+        "space_before": 0,
+        "space_after": 0,
+        "first_line_indent": 0,
+        "left_indent": 0,
+        "right_indent": 0,
+        "bullets_and_numbering_type": "NO_LIST",
+        "numbering_format": "1, 2, 3, 4...",
+        "numbering_start_at": 1,
+        "bullet_char": null,
+        "tab_stops": [],
+        "keep_with_next": 0,
+        "keep_lines_together": false,
+        "keep_first_lines": 2,
+        "keep_last_lines": 2,
+        "hyphenation": true,
+        "hyphenate_capitalized_words": true,
+        "hyphen_zone": 0,
+        "hyphenate_ladder_limit": 3,
+        "composer": "Adobe Paragraph Composer",
+        "rule_above": {
+          "active": false
+        },
+        "rule_below": {
+          "active": false
+        },
+        "drop_cap_lines": 0,
+        "drop_cap_characters": 0,
+        "mojikumi_table": null,
+        "kinsoku_set": null,
+        "balance_ragged_lines": true,
+        "kanji_word_spacing": 100,
+        "cjk_grid_tracking": false,
+        "glyph_form": "NONE",
+        "single_word_justification": "FULLY_JUSTIFIED",
+        "kashidas": true,
+        "kerning_for_japanese": true
+      },
+      "source_hash": "38aecd2a",
+      "is_hidden_object": false,
+      "hidden_reason": "",
+      "source_links": []
+    },
+    {
+      "tid": "tid_test_000003",
+      "story_id": 232,
+      "paragraph_index": 2,
+      "paragraph_uid": -1,
+      "source_text": "Sample source 3",
+      "segment_kind": "text",
+      "translatable": true,
+      "target_policy": "translate",
+      "paragraph_style": "[Basic Paragraph]",
+      "page_indexes": [
+        0
+      ],
+      "line_rects": [
+        {
+          "page_index": 0,
+          "x0": 239.99999999999795,
+          "y0": 268.79999999999774,
+          "x1": 334.42382812499795,
+          "y1": 281.37385253906024
+        }
+      ],
+      "line_rects_norm": [
+        {
+          "page_index": 0,
+          "nx0": 0.403178389638312,
+          "ny0": 0.3192854088468638,
+          "nx1": 0.561801918667156,
+          "ny1": 0.3342208539685706
+        }
+      ],
+      "point_size": 12,
+      "leading_pt": 0,
+      "leading_ratio": 1.2,
+      "leading_auto": true,
+      "inline_styles": [],
+      "format_snapshot": {
+        "uniform": true,
+        "baseline": {
+          "fontFamily": "Microsoft YaHei",
+          "fontStyle": "Regular",
+          "fontSize": 12,
+          "fillColor": {
+            "swatch": "Black",
+            "space": "CMYK",
+            "values": [
+              0,
+              0,
+              0,
+              100
+            ],
+            "displayedRGB": null
+          },
+          "underline": false,
+          "underlineOffset": -9999,
+          "underlineWeight": -9999,
+          "underlineColor": null,
+          "underlineTint": -1,
+          "strikeThrough": false,
+          "tracking": 0,
+          "baseline_shift": 0,
+          "horizontal_scale": 100,
+          "vertical_scale": 100,
+          "skew": 0,
+          "position": "NORMAL"
+        },
+        "runs": []
+      },
+      "paragraph_snapshot": {
+        "justification": "LEFT_ALIGN",
+        "leading": "AUTO",
+        "auto_leading": 120,
+        "space_before": 0,
+        "space_after": 0,
+        "first_line_indent": 0,
+        "left_indent": 0,
+        "right_indent": 0,
+        "bullets_and_numbering_type": "NO_LIST",
+        "numbering_format": "1, 2, 3, 4...",
+        "numbering_start_at": 1,
+        "bullet_char": null,
+        "tab_stops": [],
+        "keep_with_next": 0,
+        "keep_lines_together": false,
+        "keep_first_lines": 2,
+        "keep_last_lines": 2,
+        "hyphenation": true,
+        "hyphenate_capitalized_words": true,
+        "hyphen_zone": 0,
+        "hyphenate_ladder_limit": 3,
+        "composer": "Adobe Paragraph Composer",
+        "rule_above": {
+          "active": false
+        },
+        "rule_below": {
+          "active": false
+        },
+        "drop_cap_lines": 0,
+        "drop_cap_characters": 0,
+        "mojikumi_table": null,
+        "kinsoku_set": null,
+        "balance_ragged_lines": true,
+        "kanji_word_spacing": 100,
+        "cjk_grid_tracking": false,
+        "glyph_form": "NONE",
+        "single_word_justification": "FULLY_JUSTIFIED",
+        "kashidas": true,
+        "kerning_for_japanese": true
+      },
+      "source_hash": "38aecd2b",
+      "is_hidden_object": false,
+      "hidden_reason": "",
+      "source_links": []
+    }
+  ]
+}

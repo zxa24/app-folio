@@ -1,0 +1,10 @@
+tid_total	3
+tid_fallback	3
+tid_fallback_ratio	1.000000
+tid_fallback_ratio_human	100.00%
+tid_fallback_block_ratio	0.050000
+
+story_id	paragraph_index	status	method	tid	message
+232	0	fallback	none	fallback_232_0	[read_only] no associated xml element 
+232	16	fallback	none	fallback_232_16	[read_only] no associated xml element 
+232	32	fallback	none	fallback_232_32	[read_only] no associated xml element 

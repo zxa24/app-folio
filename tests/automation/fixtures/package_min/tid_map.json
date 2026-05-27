@@ -1,0 +1,36 @@
+{
+  "schema_version": "translation-mvp-1",
+  "document_name": "min.indd",
+  "generated_at_utc": "2026-05-27T14:54:06.547Z",
+  "mappings": [
+    {
+      "tid": "tid_test_000001",
+      "story_id": 232,
+      "paragraph_index": 0,
+      "paragraph_uid": -1,
+      "source_hash": "38aecd29",
+      "source_text_norm": "Sample source 1"
+    },
+    {
+      "tid": "tid_test_000002",
+      "story_id": 232,
+      "paragraph_index": 1,
+      "paragraph_uid": -1,
+      "source_hash": "38aecd2a",
+      "source_text_norm": "Sample source 2"
+    },
+    {
+      "tid": "tid_test_000003",
+      "story_id": 232,
+      "paragraph_index": 2,
+      "paragraph_uid": -1,
+      "source_hash": "38aecd2b",
+      "source_text_norm": "Sample source 3"
+    }
+  ],
+  "summary": {
+    "rows": 3,
+    "fallback_rows": 3,
+    "non_fallback_rows": 0
+  }
+}

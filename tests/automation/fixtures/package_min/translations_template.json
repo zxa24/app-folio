@@ -1,0 +1,27 @@
+{
+  "schema_version": "translation-mvp-1",
+  "document_name": "min.indd",
+  "translations": [
+    {
+      "tid": "fallback_232_0",
+      "source_text": "Sample source 1",
+      "target_text": "",
+      "status": "todo",
+      "notes": ""
+    },
+    {
+      "tid": "fallback_232_16",
+      "source_text": "Sample source 2",
+      "target_text": "",
+      "status": "todo",
+      "notes": ""
+    },
+    {
+      "tid": "fallback_232_32",
+      "source_text": "Sample source 3",
+      "target_text": "",
+      "status": "todo",
+      "notes": ""
+    }
+  ]
+}
