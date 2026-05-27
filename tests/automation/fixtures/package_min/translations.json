@@ -5,31 +5,45 @@
     {
       "tid": "tid_test_000001",
       "source_text": "Sample source 1",
-      "target_text": "你好世界示例文本测试",
+      "target_text": "你好世界测试文本",
       "status": "translated",
       "notes": "",
       "annotations": [
         {
+          "type": "format",
           "action": "bold",
+          "text": "你好",
           "offset": 0,
-          "length": 2
+          "length": 2,
+          "context_before": "",
+          "context_after": "世界测试文本"
         },
         {
+          "type": "format",
           "action": "italic",
+          "text": "世界",
           "offset": 2,
-          "length": 2
+          "length": 2,
+          "context_before": "你好",
+          "context_after": "测试文本"
         },
         {
+          "type": "format",
           "action": "color",
+          "text": "测试",
           "offset": 4,
           "length": 2,
-          "color": "#cc0000"
+          "color": "#cc0000",
+          "context_before": "世界",
+          "context_after": "文本"
         },
         {
-          "action": "comment",
+          "type": "comment",
+          "text": "文本",
           "offset": 6,
           "length": 2,
-          "content": "test comment"
+          "context_before": "测试",
+          "context_after": ""
         }
       ]
     },
@@ -41,16 +55,20 @@
       "notes": "",
       "annotations": [
         {
+          "type": "format",
           "action": "superscript",
-          "offset": 4,
-          "length": 1
+          "text": "符",
+          "offset": 5,
+          "length": 1,
+          "context_before": "段落含上标",
+          "context_after": "号标记"
         }
       ]
     },
     {
       "tid": "tid_test_000003",
       "source_text": "Sample source 3",
-      "target_text": "普通段落无标注",
+      "target_text": "无标注的普通行",
       "status": "translated",
       "notes": "",
       "annotations": []
