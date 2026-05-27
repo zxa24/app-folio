@@ -3,21 +3,21 @@
   "document_name": "min.indd",
   "translations": [
     {
-      "tid": "fallback_232_0",
+      "tid": "tid_test_000001",
       "source_text": "Sample source 1",
       "target_text": "",
       "status": "todo",
       "notes": ""
     },
     {
-      "tid": "fallback_232_16",
+      "tid": "tid_test_000002",
       "source_text": "Sample source 2",
       "target_text": "",
       "status": "todo",
       "notes": ""
     },
     {
-      "tid": "fallback_232_32",
+      "tid": "tid_test_000003",
       "source_text": "Sample source 3",
       "target_text": "",
       "status": "todo",

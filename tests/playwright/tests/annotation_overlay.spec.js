@@ -87,6 +87,44 @@ async function loadPackageMin(page) {
   return pageErrors;
 }
 
+/**
+ * Test-setup contract: tests asserting on [data-hotspot-owner] DOM must
+ * explicitly request a PDF render and then wait for it to complete.
+ *
+ * Why: app.js's renderAll() at line 1757 invokes renderPdf() as
+ * fire-and-forget (`void renderPdfAsync()`), and renderHotspots() bails
+ * early when state.pdfViewBox is null. After certain interactions the
+ * hotspot layer can also be cleared mid-test. Treating "render the PDF
+ * and wait for hotspots to mount" as a single explicit test-setup step
+ * avoids racing on the implicit initial render.
+ *
+ * Soundness: the helper clears the hotspot layer's children BEFORE
+ * triggering renderPdf, so when the wait sees children > 0 again it
+ * must be the freshly-requested render that populated them. If
+ * renderHotspots ever regresses such that the layer is no longer
+ * repopulated after a render request, this wait will time out and
+ * surface the regression rather than masking it.
+ */
+async function waitForHotspots(page) {
+  await page.evaluate(() => {
+    const layer = document.getElementById("hotspotLayer");
+    if (layer) {
+      layer.innerHTML = "";
+    }
+    if (typeof window.renderPdf === "function") {
+      window.renderPdf();
+    }
+  });
+  await page.waitForFunction(
+    () => {
+      const layer = document.getElementById("hotspotLayer");
+      return layer && layer.children.length > 0;
+    },
+    null,
+    { timeout: 20000, polling: 250 }
+  );
+}
+
 // ── Test 1: overlay renders .ann-highlight spans ──
 
 test("annotation overlay renders .ann-highlight spans after loading package", async ({ page }) => {
@@ -388,10 +426,10 @@ test("bold toggle off updates hotspot preview", async ({ page }) => {
   await toolbar.locator('[data-ann-action="bold"]').click();
 
   // Hotspot should no longer have <b> for the removed annotation
-  if (await hotspot.count() > 0) {
-    const hotspotHtml = await hotspot.innerHTML();
-    expect(hotspotHtml).not.toContain("<b>你好</b>");
-  }
+  await waitForHotspots(page);
+  await expect(hotspot).toBeAttached({ timeout: 2000 });
+  const hotspotHtml = await hotspot.innerHTML();
+  expect(hotspotHtml).not.toContain("<b>你好</b>");
 
   expect(pageErrors).toEqual([]);
 });
@@ -638,11 +676,11 @@ test("classic view: toggle off bold, hotspot updated", async ({ page }) => {
   await toolbar.locator('[data-ann-action="bold"]').click();
 
   // Hotspot should reflect change
+  await waitForHotspots(page);
   const hotspot = page.locator('[data-hotspot-owner="tid_test_000001"] .hotspot-text');
-  if (await hotspot.count() > 0) {
-    const html = await hotspot.innerHTML();
-    expect(html).not.toContain("<b>你好</b>");
-  }
+  await expect(hotspot).toBeAttached({ timeout: 2000 });
+  const html = await hotspot.innerHTML();
+  expect(html).not.toContain("<b>你好</b>");
 
   expect(pageErrors).toEqual([]);
 });
@@ -781,20 +819,18 @@ test("color: select color chip updates hotspot, deselect removes", async ({ page
   await colorPanel.locator('.ann-tb-color-chip[data-color="#ff0000"]').click();
 
   // Hotspot should have color span
+  await waitForHotspots(page);
   const hotspot = page.locator('[data-hotspot-owner="tid_test_000003"] .hotspot-text');
-  if (await hotspot.count() > 0) {
-    const html = await hotspot.innerHTML();
-    expect(html).toContain("color");
-  }
+  await expect(hotspot).toBeAttached({ timeout: 2000 });
+  const html = await hotspot.innerHTML();
+  expect(html).toContain("color");
 
   // Click same color again to remove
   await colorPanel.locator('.ann-tb-color-chip[data-color="#ff0000"]').click();
 
   // Hotspot should no longer have color
-  if (await hotspot.count() > 0) {
-    const html2 = await hotspot.innerHTML();
-    expect(html2).not.toContain("color:#ff0000");
-  }
+  const html2 = await hotspot.innerHTML();
+  expect(html2).not.toContain("color:#ff0000");
 
   expect(pageErrors).toEqual([]);
 });
@@ -856,22 +892,22 @@ test("reset button clears annotations and hotspot text", async ({ page }) => {
 
   // Click reset button
   const resetBtn = card.locator('[data-reset-row="tid_test_000001"]');
-  if (await resetBtn.count() > 0) {
-    await resetBtn.click();
+  await expect(resetBtn).toBeAttached({ timeout: 2000 });
+  await resetBtn.click();
 
-    // Overlay should have no highlights
-    const countAfter = await overlay.locator(".ann-highlight").count();
-    expect(countAfter).toBe(0);
+  // Overlay should have no highlights
+  const countAfter = await overlay.locator(".ann-highlight").count();
+  expect(countAfter).toBe(0);
 
-    // Hotspot text should be gone or plain
-    const hotspot = page.locator('[data-hotspot-owner="tid_test_000001"] .hotspot-text');
-    const hotspotCount = await hotspot.count();
-    if (hotspotCount > 0) {
-      const html = await hotspot.innerHTML();
-      expect(html).not.toContain("<b>");
-      expect(html).not.toContain("<i>");
-    }
-  }
+  // After reset, tid_test_000001's hotspot is either absent (target_text
+  // cleared back to todo) or present with no formatting. Either is valid;
+  // what must NOT happen is bold/italic tags surviving the reset.
+  await waitForHotspots(page);
+  const hotspotHtmlJoined = await page
+    .locator('[data-hotspot-owner="tid_test_000001"] .hotspot-text')
+    .evaluateAll((els) => els.map((el) => el.innerHTML).join("|"));
+  expect(hotspotHtmlJoined).not.toContain("<b>");
+  expect(hotspotHtmlJoined).not.toContain("<i>");
 
   expect(pageErrors).toEqual([]);
 });
@@ -1032,14 +1068,14 @@ test("offset accuracy: mixed CJK+Latin paste then annotate", async ({ page }) =>
   const card = page.locator('.segment-card[data-tid="tid_test_000003"]');
   const textarea = card.locator(".card-target");
 
-  const longText = "如果您成功举办本次研讨会的JonesLink页面该页面包含一份完整的分步指南可帮助您准备并成功举办本次研讨会";
+  const longText = "如果您成功举办本次研讨会的BrandLink页面该页面包含一份完整的分步指南可帮助您准备并成功举办本次研讨会";
   await textarea.focus();
   await textarea.evaluate((el, text) => {
     el.value = text;
     el.dispatchEvent(new Event("input", { bubbles: true }));
   }, longText);
 
-  // Select "会的JonesLink" programmatically (offset 11, length 11)
+  // Select "会的BrandLink" programmatically (offset 11, length 11)
   await textarea.evaluate((el) => {
     el.selectionStart = 11;
     el.selectionEnd = 22;
@@ -1059,7 +1095,7 @@ test("offset accuracy: mixed CJK+Latin paste then annotate", async ({ page }) =>
   expect(ann).not.toBeNull();
   expect(ann.offset).toBe(11);
   expect(ann.length).toBe(11);
-  expect(ann.text).toBe("会的JonesLink");
+  expect(ann.text).toBe("会的BrandLink");
 
   expect(pageErrors).toEqual([]);
 });
@@ -1077,16 +1113,16 @@ test("offset accuracy: paste replace then annotate middle", async ({ page }) => 
   }, text1);
 
   // Replace with second paste
-  const text2 = "爱德华琼斯公司概况这是一份关于Edward Jones的概述文件请仔细阅读";
+  const text2 = "样例品牌甲公司概况这是一份关于Example Brand的概述文件请仔细阅读";
   await textarea.evaluate((el, text) => {
     el.value = text;
     el.dispatchEvent(new Event("input", { bubbles: true }));
   }, text2);
 
-  // Select "Edward Jones" programmatically (offset 15, length 12)
+  // Select "Example Brand" programmatically (offset 15, length 13)
   await textarea.evaluate((el) => {
     el.selectionStart = 15;
-    el.selectionEnd = 27;
+    el.selectionEnd = 28;
   });
   await textarea.dispatchEvent("mouseup");
 
@@ -1102,8 +1138,8 @@ test("offset accuracy: paste replace then annotate middle", async ({ page }) => 
 
   expect(ann).not.toBeNull();
   expect(ann.offset).toBe(15);
-  expect(ann.length).toBe(12);
-  expect(ann.text).toBe("Edward Jones");
+  expect(ann.length).toBe(13);
+  expect(ann.text).toBe("Example Brand");
 
   expect(pageErrors).toEqual([]);
 });
