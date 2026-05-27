@@ -629,10 +629,17 @@
     // when the source is actually Traditional Chinese.
     if (direction) {
       const cfgNext = applyQuickDirection(loadConfig(), direction);
-      if (cfgNext) {
-        saveConfig(cfgNext);
-        updateButtonLabelFromConfig(cfgNext);
+      // #SEC: An unrecognized direction must abort — silently falling
+      // through to the stored config is dangerous when paired with
+      // autoSave=1, since it would overwrite targets using the wrong
+      // language pair. Empty/undefined direction still falls through
+      // (that's the no-direction case).
+      if (!cfgNext) {
+        console.error("[dev-translate] unknown direction:", direction);
+        return { ok: false, reason: "unknown_direction", direction: direction };
       }
+      saveConfig(cfgNext);
+      updateButtonLabelFromConfig(cfgNext);
     }
     return await runAutoTranslate({
       silent: o.silent !== false,

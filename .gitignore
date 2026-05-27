@@ -59,3 +59,7 @@ debug_*.js
 *Whole_Life_*
 *Premium_Plan_Feature*
 *translation_package_2026*
+
+# === Audit artifacts (codex-audit skill output) ===
+audit-logs/
+*.merged.jsonl

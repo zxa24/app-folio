@@ -364,14 +364,58 @@ function scheduleUrlAutomation() {
       console.error("[automation] local server not detected after 15s — abort");
       return;
     }
-    setAutomationStatus("Automation: loading package " + pkg + "…");
-    runAutomation();
+    setAutomationStatus("Automation: verifying automation token…");
+    verifyAutomationToken().then(function (ok) {
+      if (!ok) {
+        // #SEC-CSRF: Refuse silently — a malicious top-level navigation
+        // from another origin can land here with crafted query params,
+        // but cannot read the per-process token from /api/automation-token
+        // (CORS Origin gate blocks foreign reads). No prompt-then-proceed:
+        // click-through would defeat the gate.
+        setAutomationStatus("Automation: token mismatch or unavailable — refusing to run.");
+        console.warn("[automation] token gate failed — refusing URL-driven automation");
+        return;
+      }
+      setAutomationStatus("Automation: loading package " + pkg + "…");
+      runAutomation();
+    });
+  }
+
+  async function verifyAutomationToken() {
+    var supplied = params.get("token") || "";
+    if (!supplied) return false;
+    try {
+      var resp = await fetch(localServer.baseUrl + "/api/automation-token");
+      if (!resp.ok) return false;
+      var data = await resp.json();
+      var expected = (data && data.token) || "";
+      if (!expected) return false;
+      return constantTimeEquals(supplied, expected);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function constantTimeEquals(a, b) {
+    if (typeof a !== "string" || typeof b !== "string") return false;
+    if (a.length !== b.length) return false;
+    var diff = 0;
+    for (var i = 0; i < a.length; i++) {
+      diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    }
+    return diff === 0;
   }
 
   async function runAutomation() {
     try {
       console.log("[automation] loading package:", pkg);
-      await loadFolderFromServer(pkg);
+      var loadResult = await loadFolderFromServer(pkg);
+      if (!loadResult || !loadResult.ok) {
+        var reason = (loadResult && loadResult.reason) || "unknown";
+        setAutomationStatus("Automation: package load failed (" + reason + ") — aborted");
+        console.error("[automation] package load failed; aborting downstream steps:", loadResult);
+        return;
+      }
       if (autoTranslate) {
         // small delay so renderAll completes
         await new Promise(function (r) { setTimeout(r, 300); });
@@ -386,6 +430,18 @@ function scheduleUrlAutomation() {
           overwriteExisting: overwrite
         });
         console.log("[automation] translate result:", stats);
+        // #SEC: __devTranslateRun now returns {ok:false, reason} on
+        // unknown_direction / no_bridge / no_package / provider_config /
+        // translation_error. Saving after a failed translate would persist
+        // stale or partially-translated content — especially dangerous
+        // when the direction was rejected and the operator's stale config
+        // does not match the package's actual language pair.
+        if (stats && stats.ok === false) {
+          var sReason = (stats && stats.reason) || "unknown";
+          setAutomationStatus("Automation: translate failed (" + sReason + ") — skipping save.");
+          console.error("[automation] translate returned ok=false; aborting downstream save/marker:", stats);
+          return;
+        }
       }
       if (autoSave) {
         await new Promise(function (r) { setTimeout(r, 300); });
@@ -700,7 +756,7 @@ async function loadFolderFromServer(dirPath, options) {
     if (!filesData.ok || !filesData.files || filesData.files.length === 0) {
       if (!silent) alert("No supported files found in: " + dirPath);
       else console.warn("[local-server] Auto-load skipped — no supported files in: " + dirPath);
-      return;
+      return { ok: false, reason: "no_supported_files", path: dirPath };
     }
 
     var folderName = dirPath.replace(/^.*[\\/]/, "");
@@ -738,10 +794,12 @@ async function loadFolderFromServer(dirPath, options) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: dirPath })
     }).catch(function () {});
+    return { ok: true, path: dirPath, fileCount: virtualFiles.length };
   } catch (err) {
     console.error(err);
     if (!silent) alert("Failed to load package: " + err.message);
     else console.warn("[local-server] Auto-load failed: " + err.message);
+    return { ok: false, reason: "load_error", error: (err && err.message) || String(err) };
   } finally {
     if (label) label.textContent = origText;
   }
@@ -8199,6 +8257,15 @@ function updateActiveLinkAnnotation(url, hintExistingIdx) {
       removeAnnotationFromRange(_annToolbarArea, existingIdx, s, e);
       refreshAnnToolbar();
     }
+    return;
+  }
+
+  // #SEC-A: Match the protocol allowlist used in createAnnotation so editing
+  // an existing link can't smuggle javascript:/data:/vbscript:/file: URLs
+  // past the gate. Without this, the in-place update branch below would
+  // assign ex.url = url with no validation.
+  if (!isSafeUrl(url)) {
+    console.warn("[annotation] refusing unsafe URL scheme on edit:", url);
     return;
   }
 

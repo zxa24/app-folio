@@ -19,6 +19,7 @@ var path = require("path");
 var https = require("https");
 var url = require("url");
 var childProcess = require("child_process");
+var crypto = require("crypto");
 
 
 var PORT = parseInt(process.argv[2], 10) || 8080;
@@ -78,11 +79,42 @@ var SCRATCH_DIR = path.join(ROOT, ".scratch");
 var LAST_FOLDER_FILE = path.join(SCRATCH_DIR, "last_folder.txt");
 var LEGACY_LAST_FOLDER_FILE = path.join(ROOT, ".last_folder");
 
+// #SEC-CSRF: Per-process random token used to gate URL-driven automation.
+// app.js refuses to run ?package=...&autoTranslate=1 unless the URL also
+// carries ?token=<this value>, which the webapp fetches from
+// /api/automation-token. Because the token is high-entropy and generated
+// fresh per server restart, a malicious site that navigates the user to
+// http://127.0.0.1:<port>/?package=... cannot guess it, and same-origin
+// reads from a foreign origin are blocked by the CORS gate.
+//
+// Integration contract for external drivers (Playwright / MCP bridge /
+// CI scripts that open the webapp programmatically): after starting the
+// server, read <repo>/.scratch/automation_token (single line, no newline)
+// and append &token=<value> to the automation URL. The file is also
+// served via the /api/automation-token endpoint for in-page consumers.
+var AUTOMATION_TOKEN = crypto.randomBytes(16).toString("hex");
+var AUTOMATION_TOKEN_FILE = path.join(SCRATCH_DIR, "automation_token");
+
 function ensureScratchDir() {
   try {
     if (!fs.existsSync(SCRATCH_DIR)) fs.mkdirSync(SCRATCH_DIR, { recursive: true });
   } catch (e) { /* best-effort */ }
 }
+
+function persistAutomationToken() {
+  // Best-effort: read-only filesystems (sandboxed CI runners, hardened
+  // containers) shouldn't crash startup — the in-memory token still gates
+  // /api/automation-token, so in-page consumers keep working even when
+  // external drivers can't read the file.
+  try {
+    ensureScratchDir();
+    fs.writeFileSync(AUTOMATION_TOKEN_FILE, AUTOMATION_TOKEN, "utf-8");
+  } catch (e) {
+    console.warn("[automation-token] failed to write " + AUTOMATION_TOKEN_FILE +
+                 " (token gate still active in-memory): " + e.message);
+  }
+}
+persistAutomationToken();
 
 function migrateLegacyLastFolder() {
   // One-shot migration: if old .last_folder exists at root and new one doesn't,
@@ -161,6 +193,16 @@ function handlePing(req, res) {
   var lastFolder = "";
   try { lastFolder = fs.readFileSync(LAST_FOLDER_FILE, "utf-8").trim(); } catch (e) {}
   jsonReply(res, 200, { ok: true, server: "translator-app-local", lastFolder: lastFolder });
+}
+
+// #SEC-CSRF: Return the per-process automation token. The /api/* CORS
+// gate (isOriginAllowed) above already rejects cross-origin requests with
+// a foreign Origin header, so only same-origin scripts on this loopback
+// server can read the token. A malicious site that top-level-navigates
+// the user to http://127.0.0.1:<port>/?package=...&token=GUESS cannot
+// learn the value from inside its own origin.
+function handleAutomationToken(req, res) {
+  jsonReply(res, 200, { ok: true, token: AUTOMATION_TOKEN });
 }
 
 function handleWriteFile(req, res) {
@@ -520,6 +562,7 @@ var server = http.createServer(function (req, res) {
   }
 
   if (pathname === "/api/ping") return handlePing(req, res);
+  if (pathname === "/api/automation-token") return handleAutomationToken(req, res);
   if (pathname === "/api/write-file" && req.method === "POST") return handleWriteFile(req, res);
   if (pathname === "/api/open-file"  && req.method === "POST") return handleOpenFile(req, res);
   if (pathname === "/api/read-file"  && req.method === "POST") return handleReadFile(req, res);
@@ -545,11 +588,15 @@ server.listen(PORT, BIND_HOST, function () {
   console.log("  Root: " + ROOT);
   console.log("");
   console.log("  API endpoints:");
-  console.log("    GET  /api/ping             - health check");
+  console.log("    GET  /api/ping              - health check");
+  console.log("    GET  /api/automation-token  - per-process token for URL automation gate");
   console.log("    POST /api/write-file        - write file (path must be under root or approved dir)");
   console.log("    POST /api/read-file         - read file (path must be under root or approved dir)");
   console.log("    POST /api/read-dir          - list directory (must be approved)");
   console.log("    GET  /api/proxy-translate   - Google Translate proxy");
+  console.log("");
+  console.log("  Automation token (read from .scratch/automation_token):");
+  console.log("    " + AUTOMATION_TOKEN);
   console.log("");
   console.log("  Press Ctrl+C to stop.");
   console.log("");
