@@ -35,6 +35,10 @@ node_modules/
 probe_*.js
 *_probe.js
 debug_*.js
+.tmp_*
+
+# === MCP browser tool traces (Playwright MCP server output) ===
+.playwright-mcp/
 
 # === Binary assets not currently used by webapp ===
 # (vendor/ fonts intentionally NOT ignored — webapp depends on them)
