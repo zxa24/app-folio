@@ -10,7 +10,7 @@
  * - * /api/proxy-translate — forward Google Translate requests (bypass CORS)
  *
  * Usage:  node serve.js [port]
- *         Default port: 3000
+ *         Default port: 8080
  */
 
 var http = require("http");
@@ -21,7 +21,7 @@ var url = require("url");
 var childProcess = require("child_process");
 
 
-var PORT = parseInt(process.argv[2], 10) || 3000;
+var PORT = parseInt(process.argv[2], 10) || 8080;
 var ROOT = path.resolve(__dirname);
 var BIND_HOST = "127.0.0.1";   // loopback only — NEVER bind 0.0.0.0 / public
 
@@ -125,6 +125,13 @@ function cors(req, res) {
   }
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  // #SEC1/C: Frame-busting headers belong on *every* response, not just
+  // the static 200 path. setHeader before writeHead means writeHead's
+  // header arg (used by jsonReply / serveStatic / error paths) merges
+  // these in instead of overwriting them. Without this, a future endpoint
+  // that uses res.writeHead(...) without re-adding CSP would be framable.
+  res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+  res.setHeader("X-Frame-Options", "DENY");
 }
 
 function isOriginAllowed(req) {
@@ -163,6 +170,20 @@ function handleWriteFile(req, res) {
       var filePath = parsed.path;
       var content = parsed.content;
       var contentBase64 = parsed.content_base64;
+      // #SEC9: Accept {dir, name} as an alternative to {path}. Joining
+      // server-side via path.join() avoids the client guessing the platform
+      // separator (which previously misfired on Windows when the dir came
+      // back from the OS with forward slashes).
+      if (!filePath && parsed.dir && parsed.name) {
+        // Reject any "name" that tries to escape the dir (path separators
+        // or "..").  isPathAllowed still gates the joined result, but this
+        // rejects the obvious case with a clearer error.
+        if (/[\\/]/.test(parsed.name) || parsed.name === "." || parsed.name === "..") {
+          jsonReply(res, 400, { error: "Invalid filename: " + parsed.name });
+          return;
+        }
+        filePath = path.join(parsed.dir, parsed.name);
+      }
       if (!filePath || (typeof content !== "string" && typeof contentBase64 !== "string")) {
         jsonReply(res, 400, { error: "Missing path or content/content_base64" });
         return;
@@ -199,9 +220,28 @@ function handleOpenFile(req, res) {
         return;
       }
       if (!isPathAllowed(filePath)) { rejectForbiddenPath(res, filePath); return; }
-      if (!fs.existsSync(filePath)) {
+      var stat;
+      try { stat = fs.statSync(filePath); } catch (eSt) {
         jsonReply(res, 404, { error: "File not found: " + filePath });
         return;
+      }
+      if (!stat.isFile()) {
+        jsonReply(res, 400, { error: "Not a regular file: " + filePath });
+        return;
+      }
+      // #SEC3: Windows-only injection guard. spawn() passes args as an
+      // argv list, but `cmd.exe /c start` re-parses its tail through cmd's
+      // own metacharacter rules (`"`, `&`, `|`, `^`, `<`, `>`, `%`). An
+      // attacker who can place a file with one of these in the basename
+      // inside an approved package directory could otherwise smuggle a
+      // command. Reject any basename with shell-meaningful characters
+      // before we hand it to cmd. dirname is bounded by isPathAllowed.
+      if (process.platform === "win32") {
+        var base = path.basename(filePath);
+        if (/[\"&|^<>%`]/.test(base)) {
+          jsonReply(res, 400, { error: "Filename contains characters not allowed for shell open: " + base });
+          return;
+        }
       }
       // Platform-specific open command
       var cmd, args;
@@ -384,10 +424,28 @@ function handleRememberFolder(req, res) {
         jsonReply(res, 400, { error: "Missing path" });
         return;
       }
-      // Approve + persist. Future file APIs hitting this folder will pass
-      // isPathAllowed even after a server restart (next launch reads
-      // LAST_FOLDER_FILE in handlePing — but approveDir only persists for
-      // current process; restart re-approves on the first /api/package-files).
+      // #SEC2: Only persist a folder the user has *already* opened in this
+      // session via /api/package-files. Without this check, any in-origin
+      // caller (e.g., a code path under a future XSS, or a stale tab) could
+      // POST an arbitrary path here, write it to LAST_FOLDER_FILE, and have
+      // the app silently auto-load it on next launch (handlePing exposes
+      // lastFolder; app.js auto-loads). Existence + isDirectory + approval
+      // together neutralize "persist-then-replay" attacks.
+      if (!isPathAllowed(dirPath)) {
+        rejectForbiddenPath(res, dirPath);
+        return;
+      }
+      var stat;
+      try { stat = fs.statSync(dirPath); } catch (eS) {
+        jsonReply(res, 404, { error: "Directory not found: " + dirPath });
+        return;
+      }
+      if (!stat.isDirectory()) {
+        jsonReply(res, 400, { error: "Not a directory: " + dirPath });
+        return;
+      }
+      // approveDir is idempotent — folder is already approved from
+      // /api/package-files but stamp again so the assertion is visible.
       approveDir(dirPath);
       ensureScratchDir();
       fs.writeFileSync(LAST_FOLDER_FILE, dirPath, "utf-8");
@@ -430,6 +488,9 @@ function serveStatic(req, res) {
       headers["Pragma"] = "no-cache";
       headers["Expires"] = "0";
     }
+    // #SEC1/C: Frame-busting headers (Content-Security-Policy +
+    // X-Frame-Options) are set globally by cors() via setHeader, so they
+    // ride along on this writeHead without being duplicated here.
     res.writeHead(200, headers);
     res.end(data);
   });

@@ -2,7 +2,7 @@
 chcp 65001 >nul 2>&1
 setlocal
 
-set PORT=3000
+set PORT=8080
 set URL=http://localhost:%PORT%
 
 :: Find node.exe
