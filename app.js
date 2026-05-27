@@ -2,8 +2,10 @@
 
 const els = {
   packageInput: document.getElementById("packageInput"),
+  packageZipInput: document.getElementById("packageZipInput"),
   progressInput: document.getElementById("progressInput"),
   saveAllBtn: document.getElementById("saveAllBtn"),
+  savePackageZipBtn: document.getElementById("savePackageZipBtn"),
   themeModeBtn: document.getElementById("themeModeBtn"),
   packageStatus: document.getElementById("packageStatus"),
   prevPageBtn: document.getElementById("prevPageBtn"),
@@ -93,8 +95,16 @@ const localServer = {
         var origInput = document.getElementById("packageInput");
         if (origInput) origInput.disabled = true;
       }
-      // Auto-load last opened folder (silent — don't alert on failure)
+      // #SEC7: Show the path being auto-loaded in the package-status banner
+      // before we actually load it, so a malicious last_folder rewrite (or
+      // even a benign stale entry) is visible at a glance rather than
+      // silently exercising the filesystem-read pipeline. Status text uses
+      // textContent so the path can't escape into HTML.
       if (d.lastFolder) {
+        var statusEl = document.getElementById("packageStatus");
+        if (statusEl) {
+          statusEl.textContent = "Auto-loading last folder: " + d.lastFolder;
+        }
         console.log("[local-server] Auto-loading last folder: " + d.lastFolder);
         loadFolderFromServer(d.lastFolder, { silent: true });
       }
@@ -197,10 +207,16 @@ function init() {
   initThemeMode();
   preloadHotspotFonts();
   els.packageInput.addEventListener("change", onPackageInputChange);
+  if (els.packageZipInput) {
+    els.packageZipInput.addEventListener("change", onPackageZipInputChange);
+  }
   if (els.progressInput) {
     els.progressInput.addEventListener("change", onProgressInputChange);
   }
   els.saveAllBtn.addEventListener("click", onSaveAll);
+  if (els.savePackageZipBtn) {
+    els.savePackageZipBtn.addEventListener("click", onSavePackageZip);
+  }
   if (els.exportPdfBtn) {
     els.exportPdfBtn.addEventListener("click", () => exportAnnotatedPdf());
   }
@@ -291,6 +307,143 @@ function init() {
     els.packageStatus.textContent =
       "PDF.js local assets missing: translator_app/vendor/pdf.min.js";
   }
+
+  // URL-param automation hook (e2e drivers / Playwright / cron):
+  //   ?package=<path>     load that folder via local server's read-dir
+  //   &direction=zh-en    or en-zh   sets dev-translate direction
+  //   &autoTranslate=1    invoke silent runAutoTranslate after load
+  //   &overwrite=1        overwriteExisting in config
+  //   &autoSave=1         click Save Outputs after translate
+  //   &closeAfter=1       window.close() after save
+  // Defers until localServer is detected (read-dir / serve-file endpoints).
+  scheduleUrlAutomation();
+}
+
+function scheduleUrlAutomation() {
+  // #SEC1: Defense-in-depth against the iframe attack — even if a CSP gap
+  // lets a cross-origin parent embed us, refuse to drive automation when
+  // we're not the top-level document. The CSP frame-ancestors 'none' +
+  // X-Frame-Options: DENY in serve.js is the primary defense; this is the
+  // belt-and-braces check for browsers that fail-open on CSP.
+  try {
+    if (window.self !== window.top) {
+      console.warn("[automation] running inside an iframe — refusing URL-driven automation");
+      return;
+    }
+  } catch (eFr) {
+    // Cross-origin parent throws on access; that itself proves we're framed.
+    return;
+  }
+  var params;
+  try { params = new URLSearchParams(window.location.search); } catch (e) { return; }
+  var pkg = params.get("package");
+  if (!pkg) return;
+  var direction = params.get("direction") || "";
+  var autoTranslate = params.get("autoTranslate") === "1";
+  var overwrite = params.get("overwrite") === "1";
+  var autoSave = params.get("autoSave") === "1";
+  var closeAfter = params.get("closeAfter") === "1";
+
+  // #SEC8: Surface the wait in the UI so the user / e2e driver knows the
+  // app is intentionally idling. Without this banner the 15 s window looked
+  // like a stalled page; worse, the user could click "Open Folder" manually
+  // and collide with the automation entry point (_pickingFolder lock only
+  // covers manual entries).
+  var statusEl = document.getElementById("packageStatus");
+  function setAutomationStatus(msg) {
+    if (statusEl) statusEl.textContent = msg;
+  }
+  setAutomationStatus("Automation: waiting for local server (package=" + pkg + ")…");
+
+  var attempts = 0;
+  function tryRun() {
+    attempts += 1;
+    if (!localServer || !localServer.available) {
+      if (attempts < 60) { setTimeout(tryRun, 250); return; }
+      setAutomationStatus("Automation: local server not detected after 15s — aborted");
+      console.error("[automation] local server not detected after 15s — abort");
+      return;
+    }
+    setAutomationStatus("Automation: loading package " + pkg + "…");
+    runAutomation();
+  }
+
+  async function runAutomation() {
+    try {
+      console.log("[automation] loading package:", pkg);
+      await loadFolderFromServer(pkg);
+      if (autoTranslate) {
+        // small delay so renderAll completes
+        await new Promise(function (r) { setTimeout(r, 300); });
+        if (typeof window.__devTranslateRun !== "function") {
+          console.error("[automation] __devTranslateRun unavailable — dev_translate.js not loaded?");
+          return;
+        }
+        console.log("[automation] running auto-translate direction=" + direction);
+        var stats = await window.__devTranslateRun({
+          direction: direction,
+          silent: true,
+          overwriteExisting: overwrite
+        });
+        console.log("[automation] translate result:", stats);
+      }
+      if (autoSave) {
+        await new Promise(function (r) { setTimeout(r, 300); });
+        // Override the alert in onSaveAll so it doesn't block automation.
+        var origAlert = window.alert;
+        window.alert = function () { console.log("[automation alert suppressed]", Array.from(arguments)); };
+        try { onSaveAll(); } finally {
+          // Wait long enough for downloadFile promises to settle.
+          await new Promise(function (r) { setTimeout(r, 2000); });
+          window.alert = origAlert;
+        }
+        console.log("[automation] save complete");
+        // #AUTOMATION-DONE-SIGNAL: drop a marker file in the package
+        // folder so external pollers (CI runs, MCP-driven e2e harnesses)
+        // can detect completion without waiting on a fixed timer. The
+        // marker carries translation stats so consumers can verify the
+        // run actually wrote something instead of just signalling
+        // success on a no-op pass.
+        try {
+          var doneMarker = {
+            ok: true,
+            timestamp_utc: new Date().toISOString(),
+            translate: {
+              direction: direction || null,
+              auto_translate: autoTranslate
+            },
+            translate_stats: (typeof stats !== "undefined" && stats) ? stats : null,
+            package: pkg
+          };
+          var sep = pkg.indexOf("\\") >= 0 ? "\\" : "/";
+          var donePath = pkg.replace(/[\\/]+$/, "") + sep + "__automation_done.json";
+          await fetch("/api/write-file", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: donePath, content: JSON.stringify(doneMarker, null, 2) })
+          });
+          console.log("[automation] wrote done marker:", donePath);
+        } catch (eMark) {
+          console.warn("[automation] done marker write failed:", eMark);
+        }
+      }
+      if (closeAfter) {
+        await new Promise(function (r) { setTimeout(r, 500); });
+        // NOTE: window.close() only succeeds for windows opened via
+        // window.open() / Playwright's launched browsers. For a user who
+        // navigated here manually, the browser will silently ignore this
+        // and the page stays open — the automation IS finished, just no
+        // visible cue that the window can be closed. Surface a hint in
+        // the banner so the human flow doesn't look hung.
+        setAutomationStatus("Automation: complete. You may close this tab.");
+        window.close();
+      }
+    } catch (err) {
+      console.error("[automation] failed:", err);
+    }
+  }
+
+  tryRun();
 }
 
 function initThemeMode() {
@@ -426,6 +579,7 @@ function renderEmptyState() {
   clearPdfCanvas();
   els.hotspotLayer.innerHTML = "";
   els.saveAllBtn.disabled = true;
+  if (els.savePackageZipBtn) els.savePackageZipBtn.disabled = true;
   if (els.exportPdfBtn) els.exportPdfBtn.disabled = true;
   if (els.drawHotspotBtn) els.drawHotspotBtn.disabled = true;
   state.selectedAiTaskId = null;
@@ -624,6 +778,184 @@ async function onPackageInputChange(event) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// ZIP package open/save — pure-additive paths (do not replace folder open
+// or 3-file Save Outputs). Uses lib/zip_core.js + vendor/fflate.umd.js.
+//
+// Open: a single .zip is unpacked in-browser into a synthetic File[] with
+//   webkitRelativePath preserved from the archive entry paths, then handed
+//   to the same loadPackage() that the folder path uses. No downstream
+//   changes — findFile() is basename-based and ignores subdirs.
+//
+// Save: re-zip every file currently in state.packageFiles, REPLACING the
+//   three output filenames (translations.json + translation_qc_report.txt
+//   + ai_manual_handoff.txt) with the freshly-built content. Files that
+//   weren't in the original package (first save, no template) are appended
+//   at the same archive root as segments.json. Output is guaranteed
+//   reopen-able by the Open Package ZIP path above.
+// ---------------------------------------------------------------------------
+
+async function onPackageZipInputChange(event) {
+  const files = Array.from(event.target.files || []);
+  if (files.length === 0) return;
+  const zipFile = files[0];
+  if (!/\.zip$/i.test(zipFile.name)) {
+    alert("Please pick a .zip file.");
+    return;
+  }
+  if (typeof window.ZipCore === "undefined") {
+    alert("ZipCore not loaded — check that vendor/fflate.umd.js and lib/zip_core.js are present.");
+    return;
+  }
+  maybePromptDownloadMissingPdfJs();
+  try {
+    const unpacked = await unzipPackageFile(zipFile);
+    if (unpacked.length === 0) {
+      alert("ZIP contained no files.");
+      return;
+    }
+    await loadPackage(unpacked);
+    renderAll();
+  } catch (err) {
+    console.error(err);
+    alert("Failed to load ZIP: " + err.message);
+  } finally {
+    // Allow re-selecting the same file later (browsers suppress change
+    // events on identical re-selection without this).
+    try { event.target.value = ""; } catch (e) {}
+  }
+}
+
+async function unzipPackageFile(zipFile) {
+  const ab = await readArrayBuffer(zipFile);
+  const entries = window.ZipCore.readZip(new Uint8Array(ab));
+  const out = [];
+  const keys = Object.keys(entries);
+  for (let i = 0; i < keys.length; i++) {
+    const archivePath = keys[i];
+    // Skip directory entries (path ends with "/", zero bytes)
+    if (archivePath.charAt(archivePath.length - 1) === "/" && entries[archivePath].length === 0) {
+      continue;
+    }
+    const bytes = entries[archivePath];
+    const baseName = archivePath.replace(/^.*\//, "");
+    const f = new File([bytes], baseName);
+    // findFile() uses basename; inferPackageRoot() reads webkitRelativePath
+    // and takes everything before the first "/" — so preserving the entry
+    // path here gives correct package-root inference for free.
+    Object.defineProperty(f, "webkitRelativePath", {
+      value: archivePath,
+      writable: false
+    });
+    out.push(f);
+  }
+  return out;
+}
+
+function onSavePackageZip() {
+  if (typeof window.ZipCore === "undefined") {
+    alert("ZipCore not loaded — check that vendor/fflate.umd.js and lib/zip_core.js are present.");
+    return;
+  }
+  if (!state.packageFiles || state.packageFiles.length === 0) {
+    alert("No package loaded — open a folder or ZIP first.");
+    return;
+  }
+  const btn = els.savePackageZipBtn;
+  const origLabel = btn ? btn.textContent : null;
+  if (btn) { btn.disabled = true; btn.textContent = "Building ZIP..."; }
+  buildPackageZipAndDownload()
+    .then(function (info) {
+      alert(
+        "Saved package ZIP:\n" + info.filename + "\n\n" +
+        "Files: " + info.fileCount + " (" + Math.round(info.zipBytes / 1024) + " KB)\n" +
+        "Includes the 3 outputs:\n" +
+        "  - translations.json\n  - translation_qc_report.txt\n  - ai_manual_handoff.txt"
+      );
+    })
+    .catch(function (err) {
+      console.error(err);
+      alert("Save Package ZIP failed: " + err.message);
+    })
+    .then(function () {
+      if (btn) { btn.disabled = false; btn.textContent = origLabel; }
+    });
+}
+
+async function buildPackageZipAndDownload() {
+  const out = buildTranslationsOutput();
+  const translations = out.payload;
+  const qcText = buildControlTokenQaText(out.qa_rows);
+  const aiText = buildAiHandoffText();
+
+  const enc = new TextEncoder();
+  const outputBytesByName = {
+    "translations.json":         enc.encode(JSON.stringify(translations, null, 2)),
+    "translation_qc_report.txt": enc.encode(qcText),
+    "ai_manual_handoff.txt":     enc.encode(aiText)
+  };
+
+  // Derive archive root from segments.json's webkitRelativePath ("pkg/" or "")
+  let rootDir = "";
+  const segFile = findFile(state.packageFiles, "segments.json");
+  if (segFile && segFile.webkitRelativePath) {
+    const rp = String(segFile.webkitRelativePath);
+    const idx = rp.lastIndexOf("/");
+    if (idx > 0) rootDir = rp.substring(0, idx + 1);
+  }
+
+  const entries = {};
+  const seenOutputs = {};
+  // Re-add originals; replace bytes when basename matches one of the 3 outputs
+  for (let i = 0; i < state.packageFiles.length; i++) {
+    const f = state.packageFiles[i];
+    const archivePath = String(f.webkitRelativePath || f.name);
+    const baseName = archivePath.replace(/^.*\//, "");
+    if (Object.prototype.hasOwnProperty.call(outputBytesByName, baseName)) {
+      entries[archivePath] = outputBytesByName[baseName];
+      seenOutputs[baseName] = true;
+    } else {
+      const ab = await readArrayBuffer(f);
+      entries[archivePath] = new Uint8Array(ab);
+    }
+  }
+  // Append any output files that weren't in the original package
+  const outputNames = Object.keys(outputBytesByName);
+  for (let j = 0; j < outputNames.length; j++) {
+    const k = outputNames[j];
+    if (!seenOutputs[k]) {
+      entries[rootDir + k] = outputBytesByName[k];
+    }
+  }
+
+  const zipBytes = window.ZipCore.createZip(entries);
+
+  const baseName = safeStr(state.packageName) || "package";
+  const filename = baseName + "_translated_" + zipTimestampSuffix() + ".zip";
+  triggerBinaryDownload(filename, zipBytes, "application/zip");
+
+  return { filename: filename, fileCount: Object.keys(entries).length, zipBytes: zipBytes.length };
+}
+
+function zipTimestampSuffix() {
+  const d = new Date();
+  const pad = function (n) { return (n < 10 ? "0" : "") + n; };
+  return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate())
+    + "_" + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+}
+
+function triggerBinaryDownload(filename, u8Bytes, mimeType) {
+  const blob = new Blob([u8Bytes], { type: mimeType || "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+}
+
 function maybePromptDownloadMissingPdfJs() {
   var shouldDownload = false;
   if (hasPdfJs()) {
@@ -633,10 +965,15 @@ function maybePromptDownloadMissingPdfJs() {
     return;
   }
   state.promptedMissingPdfJs = true;
+  // #SEC6: README emphasizes "strict offline" — be explicit that hitting OK
+  // here opens an external CDN tab. The URLs are visible in the message so
+  // the user can copy them and download via another channel if they prefer.
   shouldDownload = confirm(
-    "Missing component: translator_app/vendor/pdf.min.js\n\n" +
-    "Do you want to download PDF.js files now?\n" +
-    "(pdf.min.js and pdf.worker.min.js)"
+    "PDF preview is disabled because pdf.min.js is missing.\n\n" +
+    "Click OK to open two CDN URLs in new tabs (external network request):\n" +
+    "  " + PDFJS_DOWNLOADS.script.url + "\n" +
+    "  " + PDFJS_DOWNLOADS.worker.url + "\n\n" +
+    "Or click Cancel and place the files into translator_app/vendor/ manually."
   );
   if (!shouldDownload) {
     return;
@@ -745,6 +1082,7 @@ async function loadPackage(files) {
   els.packageStatus.textContent =
     `Loaded ${state.packageName} | segments=${segCount} | ai_handoff=${aiCount}`;
   els.saveAllBtn.disabled = false;
+  if (els.savePackageZipBtn) els.savePackageZipBtn.disabled = false;
   if (els.exportPdfBtn) els.exportPdfBtn.disabled = false;
   if (els.drawHotspotBtn) els.drawHotspotBtn.disabled = false;
 }
@@ -874,7 +1212,25 @@ function normalizeSegment(seg) {
         : null,
     paragraph_snapshot: (seg.paragraph_snapshot && typeof seg.paragraph_snapshot === "object")
         ? seg.paragraph_snapshot
-        : null
+        : null,
+    // #34: source-side hyperlinks from the InDesign doc. Each entry =
+    // { offset, length, url, name, text } with paragraph-relative offsets.
+    // Renderer (renderSourceDecoratedHtml) wraps matching ranges in
+    // <span class="emp source-link-emp" data-link-idx="N" data-link-tid="TID">
+    // so they share the .emp highlight UI; clicking opens the format-paint
+    // popover (mirrors emphasis-run clicks), and Apply commits a link
+    // annotation into row.annotations.
+    source_links: Array.isArray(seg.source_links)
+        ? seg.source_links.filter(l =>
+            l && typeof l.offset === "number" && typeof l.length === "number" && l.length > 0 && safeStr(l.url))
+          .map(l => ({
+            offset: Number(l.offset),
+            length: Number(l.length),
+            url:    safeStr(l.url),
+            name:   safeStr(l.name) || undefined,
+            text:   safeStr(l.text) || undefined
+          }))
+        : []
   };
 }
 
@@ -932,7 +1288,7 @@ function buildInitialTranslations(segments, translationsPayload, templatePayload
   return out;
 }
 
-const VALID_FORMAT_ACTIONS = ["bold", "italic", "superscript", "color"];
+const VALID_FORMAT_ACTIONS = ["bold", "italic", "underline", "superscript", "color", "link"];
 
 function isValidAnnotation(a) {
   if (!a || typeof a !== "object") return false;
@@ -945,6 +1301,7 @@ function isValidAnnotation(a) {
     if (typeof a.offset !== "number" || a.offset < 0) return false;
     if (typeof a.length !== "number" || a.length <= 0) return false;
     if (action === "color" && !safeStr(a.color)) return false;
+    if (action === "link" && !safeStr(a.url)) return false;
   }
   return true;
 }
@@ -960,7 +1317,8 @@ function normalizeAnnotationItem(a) {
       length: Number(a.length),
       context_before: safeStr(a.context_before),
       context_after: safeStr(a.context_after),
-      color: safeStr(a.color) || undefined
+      color: safeStr(a.color) || undefined,
+      url:   safeStr(a.url)   || undefined
     };
   }
   // comment — fill defaults for missing fields
@@ -1487,9 +1845,16 @@ function renderSegmentsList(items) {
     // Phase 8B/8C: render source-side emphasis as styled spans when the
     // segment carries `format_snapshot.emphasis_runs`. Fallback to plain
     // escaped text when EmphasisOverlay isn't available or no runs.
-    const sourceRuns = (seg.format_snapshot && seg.format_snapshot.emphasis_runs) || null;
-    const sourceHtml = (sourceRuns && sourceRuns.length && typeof EmphasisOverlay !== "undefined")
-        ? EmphasisOverlay.renderEmphasisHtml(sourceDisplay, sourceRuns, seg.tid)
+    const sourceRuns  = (seg.format_snapshot && seg.format_snapshot.emphasis_runs) || null;
+    // #34: source-side hyperlinks from export. seg.source_links is an array
+    // of { offset, length, url, name } — wrap matching ranges as anchors so
+    // the translator sees which phrases are hyperlinks in the InDesign doc.
+    const sourceLinks = seg.source_links || null;
+    const hasAnyDeco  = (sourceRuns && sourceRuns.length) || (sourceLinks && sourceLinks.length);
+    const sourceHtml  = hasAnyDeco && typeof EmphasisOverlay !== "undefined"
+        ? (EmphasisOverlay.renderSourceDecoratedHtml
+            ? EmphasisOverlay.renderSourceDecoratedHtml(sourceDisplay, sourceRuns, sourceLinks, seg.tid)
+            : EmphasisOverlay.renderEmphasisHtml(sourceDisplay, sourceRuns, seg.tid))
         : escapeHtmlText(sourceDisplay);
     const empBadge = (sourceRuns && sourceRuns.length)
         ? ` <span class="emp-badge" title="Mixed-format paragraph: ${sourceRuns.length} emphasis run${sourceRuns.length === 1 ? "" : "s"}">✦${sourceRuns.length}</span>`
@@ -1558,8 +1923,10 @@ function buildPageCardHtml(seg) {
         ? (seg.soft_break_group ? "Soft-break tail \u2014 edit the head card above." : "Merged tail \u2014 edit the head card.")
         : "Enter translation...");
   // Phase 8B/8C: render emphasis runs inline when present.
-  const cardSourceRuns = (seg.format_snapshot && seg.format_snapshot.emphasis_runs) || null;
-  const cardCanRenderEmphasis = cardSourceRuns && cardSourceRuns.length &&
+  const cardSourceRuns  = (seg.format_snapshot && seg.format_snapshot.emphasis_runs) || null;
+  // #34: source-side hyperlinks
+  const cardSourceLinks = seg.source_links || null;
+  const cardCanRenderDecorated = ((cardSourceRuns && cardSourceRuns.length) || (cardSourceLinks && cardSourceLinks.length)) &&
       typeof EmphasisOverlay !== "undefined" && !isControlOnly &&
       typeof seg.source_text === "string";
   if (cardSourceRuns && cardSourceRuns.length && !window.__emphasisLogged) {
@@ -1570,8 +1937,10 @@ function buildPageCardHtml(seg) {
   }
   const sourceHtml = isControlOnly
     ? '<span class="anchor-inline">' + escapeHtmlText(sourceLabel) + "</span>"
-    : (cardCanRenderEmphasis
-        ? EmphasisOverlay.renderEmphasisHtml(seg.source_text, cardSourceRuns, seg.tid)
+    : (cardCanRenderDecorated
+        ? (EmphasisOverlay.renderSourceDecoratedHtml
+            ? EmphasisOverlay.renderSourceDecoratedHtml(seg.source_text, cardSourceRuns, cardSourceLinks, seg.tid)
+            : EmphasisOverlay.renderEmphasisHtml(seg.source_text, cardSourceRuns, seg.tid))
         : tokenAwareHtml(seg.source_text || ""));
   const systemNoteHtml = isControlOnly
     ? `<div class="system-lock-note">${escapeHtmlText(sourceLabel)} · locked</div>`
@@ -1913,11 +2282,25 @@ function onCardsViewClick(ev) {
   // Phase 8C-FP: clicking a source-side .emp span opens the format-paint
   // popover. Translator selects target textarea range, clicks "Apply",
   // diff is pushed into row.target_emphasis_runs.
+  //
+  // Two flavors of paintable spans share .emp visual highlight:
+  //   - data-emp-idx → emphasis run (bold/italic/color/size diff) → emphasis
+  //     paint via commitFormatPaint
+  //   - data-link-idx → source-side hyperlink → link annotation paint via
+  //     commitFormatPaintLink. We check the inner emp first (preferred when
+  //     a link range overlaps an emphasis run; emp is the innermost wrap).
   var empSpan = closestCompat(target, ".emp");
   if (empSpan && empSpan.hasAttribute("data-emp-idx")) {
     ev.preventDefault();
     ev.stopPropagation();
     onEmphasisSpanClick(empSpan);
+    return;
+  }
+  var linkSpan = closestCompat(target, "[data-link-idx]");
+  if (linkSpan) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    onSourceLinkSpanClick(linkSpan);
     return;
   }
 }
@@ -1938,7 +2321,6 @@ function onCardsViewClick(ev) {
 
 var _empPopoverEl  = null;
 var _empArmedTid   = null;
-var _empArmedRun   = null;
 var _empArmedArea  = null;
 var _empArmedSelectionHandler = null;
 var _empArmedSelectionChangeHandler = null;
@@ -1968,7 +2350,6 @@ function disarmFormatPaint() {
         document.removeEventListener("selectionchange", _empArmedSelectionChangeHandler);
     }
     _empArmedTid = null;
-    _empArmedRun = null;
     _empArmedArea = null;
     _empArmedSelectionHandler = null;
     _empArmedSelectionChangeHandler = null;
@@ -1980,6 +2361,7 @@ function onDocumentClickToCloseEmpPopover(ev) {
     if (!t) return;
     if (_empPopoverEl && _empPopoverEl.contains(t)) return;
     if (closestCompat(t, ".emp[data-emp-idx]")) return;
+    if (closestCompat(t, "[data-link-idx]")) return;
     // While armed, allow clicks on the armed textarea (the user is going
     // to select inside it). Outside clicks still cancel.
     if (_empArmedArea && (_empArmedArea === t || _empArmedArea.contains(t))) return;
@@ -2032,6 +2414,179 @@ function onEmphasisSpanClick(spanEl) {
     });
 }
 
+// #34 source-link format paint. Mirrors onEmphasisSpanClick but for the
+// span.emp[data-link-idx] decorations produced by renderSourceDecoratedHtml:
+// reads seg.source_links[idx], opens the same emp-popover, and on Apply
+// pushes a link annotation (action:"link", url:link.url) into row.annotations
+// — NOT into target_emphasis_runs, since the import pipeline already maps
+// link annotations onto InDesign Hyperlink objects + _T_c_link underline.
+function onSourceLinkSpanClick(spanEl) {
+    var tid = spanEl.getAttribute("data-link-tid");
+    var idxStr = spanEl.getAttribute("data-link-idx");
+    if (!tid || idxStr === null) return;
+    var idx = parseInt(idxStr, 10);
+    var seg = state.segmentByTid[tid];
+    if (!seg || !Array.isArray(seg.source_links)) return;
+    var link = seg.source_links[idx];
+    if (!link || !link.url) return;
+
+    closeEmpPopover();
+    document.querySelectorAll(".segment-card .emp.active, .row-source .emp.active")
+        .forEach(function (e) { e.classList.remove("active"); });
+    spanEl.classList.add("active");
+
+    var label = "Link → " + link.url;
+    var slice = "";
+    try {
+        var off = (typeof link.offset === "number") ? link.offset : 0;
+        var ln  = (typeof link.length === "number") ? link.length : 0;
+        slice = String(seg.source_text || "").substring(off, off + ln);
+    } catch (e) {}
+
+    var pop = document.createElement("div");
+    pop.className = "emp-popover";
+    pop.setAttribute("data-emp-popover-tid", tid);
+    pop.innerHTML = renderEmpPopoverHtml(label, slice, false);
+    document.body.appendChild(pop);
+    _empPopoverEl = pop;
+
+    var rect = spanEl.getBoundingClientRect();
+    pop.style.left = Math.round(window.scrollX + rect.left) + "px";
+    pop.style.top  = Math.round(window.scrollY + rect.bottom + 4) + "px";
+
+    pop.addEventListener("click", function (ev) {
+        var act = closestCompat(ev.target, "[data-emp-action]");
+        if (!act) return;
+        var which = act.getAttribute("data-emp-action");
+        if (which === "close") {
+            closeEmpPopover();
+            return;
+        }
+        if (which === "apply") {
+            handleApplyLinkClick(tid, link, label, slice);
+        }
+    });
+}
+
+function handleApplyLinkClick(tid, link, label, slice) {
+    var card = els.cardsView ? els.cardsView.querySelector('.segment-card[data-tid="' + escapeCssAttr(tid) + '"]') : null;
+    var area = card ? card.querySelector(".card-target") : null;
+    if (!area) {
+        console.warn("[format-paint-link] no target textarea for tid", tid);
+        return;
+    }
+    var ss = area.selectionStart, se = area.selectionEnd;
+    if (ss != null && se != null && ss !== se) {
+        commitFormatPaintLink(tid, link, ss, se, area);
+        closeEmpPopover();
+        return;
+    }
+    armFormatPaint(tid, area, label, slice, function (s, e) {
+        commitFormatPaintLink(tid, link, s, e, area);
+    });
+}
+
+function commitFormatPaintLink(tid, link, ss, se, area) {
+    var row = state.translationsByTid[tid];
+    if (!row || !area) return;
+    if (ss == null || se == null || ss === se) return;
+    if (!link || !link.url) return;
+    // #SEC-A: Reject script-protocol URLs even when they arrive via the
+    // source-link paint flow. The source data (segments.json) can come from
+    // anywhere — never trust its URLs without re-checking the protocol.
+    if (!isSafeUrl(link.url)) {
+      console.warn("[format-paint-link] refusing unsafe URL scheme:", link.url);
+      return;
+    }
+    if (!Array.isArray(row.annotations)) row.annotations = [];
+
+    var fullText = area.value || "";
+    var text = fullText.substring(ss, se);
+    if (!text) return;
+    var ctx = buildAnnotationContext(fullText, ss, se - ss);
+    var ann = {
+        type: "format",
+        action: "link",
+        text: text,
+        offset: ss,
+        length: se - ss,
+        url: String(link.url),
+        context_before: ctx.context_before,
+        context_after: ctx.context_after
+    };
+    row.annotations.push(ann);
+    // Derive companion color from the source link's actual fill color (in
+    // InDesign the linked text is typically styled blue / brand color via a
+    // designer char style; emphasis_extractor captured that as a fillColor
+    // diff on the overlapping emphasis run). Falls back to LINK_DEFAULT_COLOR
+    // when the source has no color diff over the link range.
+    var seg = state.segmentByTid[tid];
+    var sourceColor = sourceColorForRange(seg, link.offset, link.length);
+    addLinkCompanionAnnotations(row, area, ss, se - ss, sourceColor ? { color: sourceColor } : null);
+    syncCardUiForTid(tid);
+    console.log("[format-paint-link] committed", {
+        tid: tid, start: ss, end: se, url: link.url, sourceColor: sourceColor || "(default)"
+    });
+}
+
+// Convert an emphasis-extractor fillColor diff into "#RRGGBB" hex. Returns
+// null when the diff carries no color signal. Mirrors the conversion that
+// diffToAnnotationEntries does so source-derived colors and paint-derived
+// colors land in the same hex space.
+function fillColorToHex(fillColor) {
+    if (!fillColor) return null;
+    if (fillColor.values && fillColor.values.length >= 3) {
+        var r = Math.max(0, Math.min(255, Math.round(fillColor.values[0])));
+        var g = Math.max(0, Math.min(255, Math.round(fillColor.values[1])));
+        var b = Math.max(0, Math.min(255, Math.round(fillColor.values[2])));
+        return "#" + ("000000" + ((r << 16) | (g << 8) | b).toString(16)).slice(-6).toUpperCase();
+    }
+    if (fillColor.swatch) {
+        var lc = String(fillColor.swatch).toLowerCase();
+        var named = { red: "#C81E1E", blue: "#1950C8", green: "#1EA050",
+                      yellow: "#DCB41E", cyan: "#00A0C8", magenta: "#C800A0",
+                      black: "#000000", white: "#FFFFFF" };
+        // #SEC-B: For unknown swatch names, RETURN NULL — never echo the
+        // raw string. Previously this passed `fillColor.swatch` through,
+        // which let segments.json inject arbitrary text into CSS context
+        // via the color annotation (e.g., "red;background-image:url(...)").
+        // Callers handle null by skipping the color or using a default.
+        return named[lc] || null;
+    }
+    return null;
+}
+
+// #SEC-B: Color values land in `style="color:..."` inline CSS, so they must
+// pass a strict syntactic check before rendering. Accept only hex (#rgb,
+// #rrggbb, #rrggbbaa) — the only forms the toolbar and fillColorToHex
+// produce. Anything else (named CSS colors, rgb()/hsl()/var(), or smuggled
+// `;background-image:...`) is rejected to a safe default at render time.
+function isSafeCssColor(c) {
+  if (typeof c !== "string") return false;
+  return /^#[0-9a-fA-F]{3,8}$/.test(c.trim());
+}
+
+// Scan a segment's source-side emphasis_runs for the first run that overlaps
+// [offset, offset+length) and carries a fillColor diff, returning its hex.
+// Used by commitFormatPaintLink so the companion color annotation matches
+// the source link's actual color instead of a fixed default.
+function sourceColorForRange(seg, offset, length) {
+    if (!seg || !seg.format_snapshot || !Array.isArray(seg.format_snapshot.emphasis_runs)) return null;
+    if (typeof offset !== "number" || typeof length !== "number" || length <= 0) return null;
+    var rangeEnd = offset + length;
+    var runs = seg.format_snapshot.emphasis_runs;
+    for (var i = 0; i < runs.length; i++) {
+        var r = runs[i];
+        if (!r || !r.diff || !r.diff.fillColor) continue;
+        var rs = typeof r.start === "number" ? r.start : 0;
+        var re = typeof r.end === "number" ? r.end : rs;
+        if (re <= offset || rs >= rangeEnd) continue;   // no overlap
+        var hex = fillColorToHex(r.diff.fillColor);
+        if (hex) return hex;
+    }
+    return null;
+}
+
 function renderEmpPopoverHtml(label, slice, armed) {
     var hint = armed
         ? '<div class="emp-popover-hint"><b>Painting…</b> select text in the target textarea below. Press Esc to cancel.</div>'
@@ -2063,17 +2618,18 @@ function handleApplyClick(tid, run, label, slice) {
         return;
     }
     // (b) No selection → arm
-    armFormatPaint(tid, run, area, label, slice);
+    armFormatPaint(tid, area, label, slice, function (s, e) {
+        commitFormatPaint(tid, run, s, e);
+    });
 }
 
-function armFormatPaint(tid, run, area, label, slice) {
+function armFormatPaint(tid, area, label, slice, commitFn) {
     disarmFormatPaint();
     _empArmedTid = tid;
-    _empArmedRun = run;
     _empArmedArea = area;
     area.classList.add("fp-armed");
     area.focus();
-    console.log("[format-paint] armed", { tid: tid, diff: run.diff });
+    console.log("[format-paint] armed", { tid: tid, label: label });
 
     var lastApplied = false;
     // Track last NON-EMPTY selection seen on this textarea — used as
@@ -2117,7 +2673,7 @@ function armFormatPaint(tid, run, area, label, slice) {
         }
         lastApplied = true;
         console.log("[format-paint] commit via " + reason, { tid: tid, start: s, end: e });
-        commitFormatPaint(tid, run, s, e);
+        commitFn(s, e);
         closeEmpPopover();
         return true;
     };
@@ -2173,20 +2729,7 @@ function diffToAnnotationEntries(diff, offset, length) {
         else if (diff.baseline_shift < 0) anns.push({ type: "format", action: "subscript", offset: offset, length: length });
     }
     if (diff.fillColor) {
-        var hex = null;
-        if (diff.fillColor.values && diff.fillColor.values.length >= 3) {
-            var r = Math.max(0, Math.min(255, Math.round(diff.fillColor.values[0])));
-            var g = Math.max(0, Math.min(255, Math.round(diff.fillColor.values[1])));
-            var b = Math.max(0, Math.min(255, Math.round(diff.fillColor.values[2])));
-            hex = "#" + ("000000" + ((r << 16) | (g << 8) | b).toString(16)).slice(-6).toUpperCase();
-        } else if (diff.fillColor.swatch) {
-            // Try named color first, otherwise pass swatch name through
-            var lc = String(diff.fillColor.swatch).toLowerCase();
-            var named = { red: "#C81E1E", blue: "#1950C8", green: "#1EA050",
-                          yellow: "#DCB41E", cyan: "#00A0C8", magenta: "#C800A0",
-                          black: "#000000", white: "#FFFFFF" };
-            hex = named[lc] || diff.fillColor.swatch;
-        }
+        var hex = fillColorToHex(diff.fillColor);
         if (hex) anns.push({ type: "format", action: "color", offset: offset, length: length, color: hex });
     }
     if (typeof diff.fontSize === "number" && diff.fontSize > 0) {
@@ -3654,13 +4197,55 @@ function installDevTranslateBridge() {
   };
 }
 
+// For merge_head rows (manual merge OR soft-break merged), build the
+// FULL merged source so the translation provider sees the whole grouped
+// content — not just the head segment. Tails are locked and filtered out
+// by dev_translate.filterCandidates, so they never get sent individually.
+//
+// The merge UX intent is "treat as one continuous text", so we join with
+// a SPACE (not "\n"). Two reasons:
+//   1. Google preserves "\n" in its output, which would write a forced
+//      line break into the InDesign paragraph after writeback — user
+//      wants a single line ("一段文本而不是多段文本").
+//   2. Space gives Google enough word-boundary signal to translate the
+//      pieces as one phrase yet keeps the result on a single line.
+//
+// The matching InDesign writeback expects `head.target_text` to be the
+// FULL merged translation; v2 pipeline writes that into the paragraph and
+// (with v2 Fix #4) skips merge_tail rows so the original tail source
+// can't reappear.
+function buildMergedSourceForTranslation(headSeg, headTid) {
+  const headSource = safeStr(headSeg && headSeg.source_text);
+  if (!headTid || typeof getMergeTailChainForHead !== "function") {
+    return headSource;
+  }
+  const tailTids = getMergeTailChainForHead(headTid);
+  if (!tailTids || tailTids.length === 0) {
+    return headSource;
+  }
+  const parts = [headSource];
+  for (let i = 0; i < tailTids.length; i += 1) {
+    const tailSeg = state.segmentByTid[tailTids[i]];
+    if (tailSeg) {
+      parts.push(safeStr(tailSeg.source_text));
+    }
+  }
+  return parts.join(" ");
+}
+
 function getDevTranslateRows() {
   return state.segments.map(seg => {
     const tid = safeStr(seg && seg.tid);
     const row = state.translationsByTid[tid] || null;
+    let sourceText = safeStr(seg && seg.source_text);
+    // Detect merge head: row exists, is NOT a tail itself, and has tails.
+    const isMergeHead = !!(row && !isMergeTailRow(row) && hasMergeTailChildren(tid));
+    if (isMergeHead) {
+      sourceText = buildMergedSourceForTranslation(seg, tid);
+    }
     return {
       tid: tid,
-      source_text: safeStr(seg && seg.source_text),
+      source_text: sourceText,
       target_text: safeStr(row && row.target_text),
       status: safeStatus(row && row.status),
       display_status: displayStatusText(seg, row),
@@ -3670,9 +4255,9 @@ function getDevTranslateRows() {
         ? Number(seg.page_indexes[0])
         : -1,
       is_simple_text: !!(
-        isWhitespaceOnlyText(seg && seg.source_text) ||
-        isPureNumberText(seg && seg.source_text) ||
-        isPurePunctuationText(seg && seg.source_text)
+        isWhitespaceOnlyText(sourceText) ||
+        isPureNumberText(sourceText) ||
+        isPurePunctuationText(sourceText)
       ),
       translatable: !isControlOnlySegment(seg),
       locked: !!(row && isRowSystemLocked(seg, row))
@@ -3722,6 +4307,15 @@ function applyDevTranslateRows(rows, options) {
     if (!hasEffectiveTargetText(target)) {
       stats.skipped_empty += 1;
       continue;
+    }
+
+    // Defensive: for merge_head rows (manual or soft-break merged), force
+    // the auto-translated target onto a single line. Even if the source
+    // was joined with "\n" or Google preserved an internal newline, the
+    // merge UX expects "一段文本而不是多段文本" — collapse all newlines
+    // (LF, CR, U+2028 LINE SEPARATOR) into spaces.
+    if (hasMergeTailChildren(tid)) {
+      target = target.replace(/[\r\n\u2028\u2029]+/g, " ").replace(/[ \t]{2,}/g, " ").trim();
     }
 
     updateTargetText(tid, target, { fromUser: true });
@@ -3945,15 +4539,17 @@ function downloadFile(filename, content, mimeType) {
   // When local server is available and we know the package dir, write directly.
   // Resolves to "server" on successful local write, "browser" on fallback.
   if (localServer.available && localServer.packageDirPath) {
-    var sep = localServer.packageDirPath.indexOf("\\") >= 0 ? "\\" : "/";
-    var fullPath = localServer.packageDirPath + sep + filename;
+    // #SEC9: Don't guess the path separator from the dir string. Send dir +
+    // filename separately and let serve.js use path.join() (which knows the
+    // platform). The legacy single-string form is gone — write-file accepts
+    // {dir, name} as an alternative to {path} for client-supplied splits.
     return fetch(localServer.baseUrl + "/api/write-file", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: fullPath, content: content })
+      body: JSON.stringify({ dir: localServer.packageDirPath, name: filename, content: content })
     }).then(function (r) { return r.json(); }).then(function (d) {
       if (d && d.ok) {
-        console.log("[local-server] Written: " + fullPath + " (" + d.bytes + " bytes)");
+        console.log("[local-server] Written: " + (d.path || filename) + " (" + d.bytes + " bytes)");
         return "server";
       } else {
         console.error("[local-server] Write failed:", d);
@@ -4135,6 +4731,14 @@ function segmentHasControlTokens(seg) {
   return !!(required && Object.keys(required).length > 0);
 }
 
+// SAFETY INVARIANT: merge_tail rows bypass the control-token check because
+// isRowSystemLocked returns true for them. This is sound ONLY because the
+// export path (see buildTranslationsPayload near line 4079) forces
+// target_text = "" for any merge_tail row, regardless of what target_text
+// the in-memory row carries. If that forcing is ever removed, this early-
+// return becomes a hole — a tail row with arbitrary translator text would
+// ship through the QA gate. Keep the export-side forcing and this bypass
+// in sync; if either changes, audit the other.
 function controlTokensAreValid(seg, row) {
   if (!seg || !row || isRowSystemLocked(seg, row)) {
     return true;
@@ -4656,10 +5260,39 @@ function buildAnnotatedHtml(text, annotations) {
         else if (a.action === "underline")   chunk = "<u>" + chunk + "</u>";
         else if (a.action === "strikethrough") chunk = "<s>" + chunk + "</s>";
         else if (a.action === "color" && a.color) {
-          chunk = '<span style="color:' + escapeHtmlAttr(a.color) + '">' + chunk + "</span>";
+          // #SEC-B: Validate the color value before splicing into inline
+          // CSS. escapeHtmlAttr only handles HTML chars, not CSS syntax —
+          // an attacker-controlled color like "red;background-image:url(
+          // //x.evil/exfil)" would otherwise reach the CSS parser and leak
+          // a DNS request. Drop the color span when not a strict hex form.
+          if (isSafeCssColor(a.color)) {
+            chunk = '<span style="color:' + escapeHtmlAttr(a.color) + '">' + chunk + "</span>";
+          }
+        }
+        else if (a.action === "link" && a.url) {
+          // #SEC-A: rel="noopener noreferrer" does NOT prevent the browser
+          // from running href="javascript:...". The createAnnotation /
+          // commitFormatPaintLink entry points already reject unsafe URLs,
+          // but render-time is the last line of defense — legacy data
+          // (older translations.json, hand-edited JSON, etc.) can still
+          // carry one. Fall back to plain text (no anchor) when the URL
+          // is not a safe protocol.
+          if (isSafeUrl(a.url)) {
+            chunk = '<a href="' + escapeHtmlAttr(a.url) +
+                    '" target="_blank" rel="noopener noreferrer" class="ann-link" title="' + escapeHtmlAttr(a.url) + '">' +
+                    chunk + '</a>';
+          }
+          // else: leave chunk as-is — the underline/color companion
+          // annotations still render around it, but no <a> wrapper.
         }
         else if (a.action === "size" && a.size) {
-          chunk = '<span style="font-size:' + Number(a.size) + 'pt">' + chunk + "</span>";
+          // #SEC-B: Number() coerces to a number, but NaN.toString() ===
+          // "NaN" which would smuggle text into CSS. Guard with isFinite
+          // + positive range; clamp to sane bounds while we're here.
+          var sizePt = Number(a.size);
+          if (Number.isFinite(sizePt) && sizePt > 0 && sizePt <= 999) {
+            chunk = '<span style="font-size:' + sizePt + 'pt">' + chunk + "</span>";
+          }
         }
       }
     }
@@ -6804,11 +7437,21 @@ function getOrCreateAnnToolbar() {
     '<div class="ann-tb-buttons">' +
       '<button data-ann-action="bold" title="Bold (Ctrl+B)"><b>B</b></button>' +
       '<button data-ann-action="italic" title="Italic (Ctrl+I)"><i>I</i></button>' +
+      '<button data-ann-action="underline" title="Underline (Ctrl+U)"><span style="text-decoration:underline;text-underline-offset:2px">U</span></button>' +
       '<button data-ann-action="superscript" title="Superscript"><span style="font-size:0.75em;vertical-align:super">x\u00b2</span></button>' +
       '<button data-ann-action="color" title="Color"><span class="ann-tb-color-swatch"></span>A</button>' +
+      '<button data-ann-action="link" title="Hyperlink (Ctrl+K)"><span style="text-decoration:underline">\ud83d\udd17</span></button>' +
       '<button data-ann-action="comment" title="Comment">\ud83d\udcac</button>' +
       '<span class="ann-tb-sep"></span>' +
       '<button data-ann-action="delete" title="Remove annotation" class="ann-tb-delete hidden">\u2715</button>' +
+    '</div>' +
+    // Sub-panels render top-to-bottom in DOM order. Link panel sits directly
+    // beneath the button row, color panel below it, comment panel last \u2014
+    // matches the user's mental model of "primary input first, swatches
+    // next". Multiple panels can be open simultaneously when more than one
+    // annotation type covers the selection.
+    '<div class="ann-tb-link-panel hidden">' +
+      '<input class="ann-tb-link-url" type="url" placeholder="https://\u2026 (Enter to apply, empty + Enter to remove)" />' +
     '</div>' +
     '<div class="ann-tb-color-panel hidden">' +
       ANN_TOOLBAR_COLORS.map(function (c) {
@@ -7025,8 +7668,56 @@ function showAnnToolbar(area, mode, editIdx) {
           syncColorChipSelection(safeStr(ca.color));
         }
       }
+      if (ca.type === "format" && ca.action === "link") {
+        // Auto-show link URL input when a link annotation covers selection —
+        // mirrors color/comment auto-show above. No focus-steal: translator
+        // is mid-selection in the textarea, so we just surface the value;
+        // clicking the URL field or pressing Ctrl+K focuses it.
+        showLinkPanel({ focus: false, existingLinkIdx: cov[ci], row: row });
+      }
     }
   }
+}
+
+// Render the link URL panel pre-filled from an existing link annotation if
+// one covers the current selection. Wires Enter/Escape/blur handlers in one
+// place so the click-toggle path and the auto-show path stay in sync.
+function showLinkPanel(opts) {
+  if (!_annToolbar) return;
+  var lp = _annToolbar.querySelector(".ann-tb-link-panel");
+  if (!lp) return;
+  lp.classList.remove("hidden");
+  var urlInput = lp.querySelector(".ann-tb-link-url");
+  if (!urlInput) return;
+
+  var row = opts && opts.row;
+  var existingLinkIdx = opts && typeof opts.existingLinkIdx === "number" ? opts.existingLinkIdx : -1;
+  var existingUrl = (existingLinkIdx >= 0 && row && row.annotations && row.annotations[existingLinkIdx] && row.annotations[existingLinkIdx].url) || "";
+  urlInput.value = existingUrl;
+
+  if (opts && opts.focus) {
+    // Defer focus so panel paint settles first; otherwise textarea blur
+    // can re-hide the toolbar before focus lands.
+    setTimeout(function () { urlInput.focus(); urlInput.select(); }, 0);
+  }
+
+  urlInput.onkeydown = function (ev) {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      var val = urlInput.value.trim();
+      updateActiveLinkAnnotation(val, existingLinkIdx);
+      lp.classList.add("hidden");
+    } else if (ev.key === "Escape") {
+      lp.classList.add("hidden");
+    }
+  };
+  urlInput.onblur = function () {
+    // Auto-commit on blur (forgiving UX, matches color panel hex input).
+    var val = urlInput.value.trim();
+    if (val !== existingUrl) {
+      updateActiveLinkAnnotation(val, existingLinkIdx);
+    }
+  };
 }
 
 function hideAnnToolbar() {
@@ -7066,6 +7757,17 @@ function hideAnnSubPanels() {
       ta.__annCommentIdx = -1;
     }
     mp.classList.add("hidden");
+  }
+  // Link panel: detach handlers + clear value
+  var lp = _annToolbar.querySelector(".ann-tb-link-panel");
+  if (lp) {
+    var li = lp.querySelector(".ann-tb-link-url");
+    if (li) {
+      li.onkeydown = null;
+      li.onblur = null;
+      li.value = "";
+    }
+    lp.classList.add("hidden");
   }
 }
 
@@ -7263,14 +7965,100 @@ function createAnnotation(area, action, extra) {
   if (action === "color") {
     ann.color = (extra && extra.color) || ANN_TOOLBAR_COLORS[0];
   }
+  if (action === "link") {
+    ann.url = (extra && extra.url) || "";
+    if (!ann.url) return;   // refuse empty URL — schema validator rejects
+    if (!isSafeUrl(ann.url)) {
+      console.warn("[annotation] refusing unsafe URL scheme:", ann.url);
+      return;
+    }
+  }
   if (action === "comment") {
     ann.text = (extra && extra.comment) || text;
     ann.offset = start;
     ann.length = end - start;
   }
   row.annotations.push(ann);
+  if (action === "link") {
+    addLinkCompanionAnnotations(row, area, start, end - start);
+  }
   syncAnnotationVisuals(area);
   refreshAnnToolbar();
+}
+
+// Default color applied alongside every link annotation. Picked from the
+// existing toolbar palette so the chip lights up after creation and the
+// translator can change/remove it via the regular color toolbar.
+var LINK_DEFAULT_COLOR = "#0066cc";
+
+// #SEC-A: Refuse javascript:, data:, vbscript:, etc. on link annotations.
+// rel="noopener noreferrer" + target="_blank" do NOT block script-protocol
+// navigation — clicking <a href="javascript:..."> still runs the URL in the
+// current origin, which here is the local server with full filesystem API
+// access. Allowlist exactly the protocols that make sense for a translation
+// hyperlink: http/https and mailto. Relative URLs resolve against the
+// current page so a translator-typed "/foo" also lands as http(s):.
+function isSafeUrl(u) {
+  if (typeof u !== "string" || !u) return false;
+  try {
+    var p = new URL(u, location.href).protocol;
+    return p === "http:" || p === "https:" || p === "mailto:";
+  } catch (e) { return false; }
+}
+
+// When the translator creates a link annotation (toolbar Ctrl+K, source-link
+// paint, etc.), also push a regular `color` and `underline` annotation at the
+// same range — UNLESS one already covers the exact same range. Result: the
+// "blue + underlined" hyperlink look is composed from three independent
+// annotations the translator can toggle/edit individually via the standard
+// toolbar (U button, color chips), rather than baked into a single link
+// entry with hidden styling.
+//
+// `opts.color` overrides LINK_DEFAULT_COLOR — source-link paint passes the
+// color extracted from the source's emphasis run so painted links match the
+// original document's link color (e.g., brand blue) instead of a fixed hex.
+function addLinkCompanionAnnotations(row, area, offset, length, opts) {
+  if (!row || !area || length <= 0) return;
+  if (!Array.isArray(row.annotations)) row.annotations = [];
+  var fullText = area.value || "";
+  var text = fullText.substring(offset, offset + length);
+  if (!text) return;
+
+  var hasColor = false, hasUnderline = false;
+  for (var i = 0; i < row.annotations.length; i++) {
+    var a = row.annotations[i];
+    if (!a || a.type !== "format") continue;
+    if (a.offset !== offset || a.length !== length) continue;
+    if (a.action === "color") hasColor = true;
+    else if (a.action === "underline") hasUnderline = true;
+  }
+  if (hasColor && hasUnderline) return;
+
+  var ctx = buildAnnotationContext(fullText, offset, length);
+  var color = (opts && opts.color) || LINK_DEFAULT_COLOR;
+  if (!hasColor) {
+    row.annotations.push({
+      type: "format",
+      action: "color",
+      text: text,
+      offset: offset,
+      length: length,
+      color: color,
+      context_before: ctx.context_before,
+      context_after: ctx.context_after
+    });
+  }
+  if (!hasUnderline) {
+    row.annotations.push({
+      type: "format",
+      action: "underline",
+      text: text,
+      offset: offset,
+      length: length,
+      context_before: ctx.context_before,
+      context_after: ctx.context_after
+    });
+  }
 }
 
 function deleteAnnotation(area, idx) {
@@ -7375,6 +8163,60 @@ function updateActiveColorAnnotation(color) {
   _annToolbarArea.selectionStart = _annToolbarSelStart;
   _annToolbarArea.selectionEnd = _annToolbarSelEnd;
   createAnnotation(_annToolbarArea, "color", { color: color });
+}
+
+/**
+ * Apply / update / remove a hyperlink annotation on the current
+ * toolbar selection. Mirrors updateActiveColorAnnotation. Empty `url`
+ * removes the link (so users can clear it without deleting the whole
+ * annotation via the X button — the panel stays focused on link UX).
+ */
+function updateActiveLinkAnnotation(url, hintExistingIdx) {
+  if (!_annToolbarArea) return;
+  var tid = resolveTextareaTid(_annToolbarArea);
+  var row = tid && state.translationsByTid[tid];
+  if (!row) return;
+  if (!Array.isArray(row.annotations)) row.annotations = [];
+  var s = _annToolbarSelStart, e = Math.max(_annToolbarSelEnd, _annToolbarSelStart + 1);
+  var cov = findAnnotationsInRange(row.annotations, s, e);
+  // First try the hint, fall back to scan for type=format/action=link
+  var existingIdx = -1;
+  if (typeof hintExistingIdx === "number" && hintExistingIdx >= 0
+      && row.annotations[hintExistingIdx]
+      && row.annotations[hintExistingIdx].type === "format"
+      && row.annotations[hintExistingIdx].action === "link") {
+    existingIdx = hintExistingIdx;
+  } else {
+    for (var i = 0; i < cov.length; i++) {
+      var a = row.annotations[cov[i]];
+      if (a.type === "format" && a.action === "link") { existingIdx = cov[i]; break; }
+    }
+  }
+
+  if (!url) {
+    // Remove path: drop the existing link annotation if any.
+    if (existingIdx >= 0) {
+      removeAnnotationFromRange(_annToolbarArea, existingIdx, s, e);
+      refreshAnnToolbar();
+    }
+    return;
+  }
+
+  if (existingIdx >= 0) {
+    var ex = row.annotations[existingIdx];
+    if (ex.offset === s && ex.offset + ex.length === e) {
+      // Exact-range existing link → just update URL in place.
+      ex.url = url;
+      syncAnnotationVisuals(_annToolbarArea);
+      refreshAnnToolbar();
+      return;
+    }
+    // Sub-range or mismatch → remove old over selection, create new.
+    removeAnnotationFromRange(_annToolbarArea, existingIdx, s, e);
+  }
+  _annToolbarArea.selectionStart = _annToolbarSelStart;
+  _annToolbarArea.selectionEnd = _annToolbarSelEnd;
+  createAnnotation(_annToolbarArea, "link", { url: url });
 }
 
 /** Highlight the selected color chip (radio behavior) and update swatch. */
@@ -7574,6 +8416,28 @@ function onAnnToolbarClick(e) {
     return;
   }
 
+  if (action === "link") {
+    // Show the URL panel (similar pattern to the color panel above).
+    // Don't auto-create an annotation — only commit when the user
+    // confirms a URL with Enter or blurs the field with a valid value.
+    var areaLk = _annToolbarArea;
+    if (!areaLk) return;
+
+    var tidLk = resolveTextareaTid(areaLk);
+    var rowLk = tidLk && state.translationsByTid[tidLk];
+    var existingLinkIdx = -1;
+    if (rowLk && Array.isArray(rowLk.annotations)) {
+      var covLk = findAnnotationsInRange(rowLk.annotations, _annToolbarSelStart, Math.max(_annToolbarSelEnd, _annToolbarSelStart + 1));
+      for (var lci = 0; lci < covLk.length; lci++) {
+        var caL = rowLk.annotations[covLk[lci]];
+        if (caL.type === "format" && caL.action === "link") { existingLinkIdx = covLk[lci]; break; }
+      }
+    }
+
+    showLinkPanel({ focus: true, existingLinkIdx: existingLinkIdx, row: rowLk });
+    return;
+  }
+
   if (action === "comment") {
     // Immediately create comment annotation with empty text → shows highlight
     // User types in input; on blur, update text or delete if empty
@@ -7655,12 +8519,29 @@ function bindAnnToolbarEvents(area) {
     }
   });
 
-  // Phase 4: Ctrl+B / Ctrl+I shortcuts
+  // Phase 4: Ctrl+B / Ctrl+I / Ctrl+K shortcuts
   area.addEventListener("keydown", function (e) {
     if (!(e.ctrlKey || e.metaKey)) return;
     var action = "";
     if (e.key === "b" || e.key === "B") action = "bold";
     else if (e.key === "i" || e.key === "I") action = "italic";
+    else if (e.key === "u" || e.key === "U") action = "underline";
+    else if (e.key === "k" || e.key === "K") {
+      // Ctrl+K → trigger link panel (same path as toolbar button click).
+      // Don't run the toggle-by-shortcut logic below; URL needs explicit
+      // input from the user.
+      var startLk = area.selectionStart, endLk = area.selectionEnd;
+      if (startLk === endLk) return;
+      e.preventDefault();
+      // Ensure toolbar is visible + selection synced; then synthesize a
+      // click on the link button so we share the link-panel handler.
+      _annToolbarSelStart = startLk;
+      _annToolbarSelEnd = endLk;
+      _annToolbarArea = area;
+      var btnLk = _annToolbar && _annToolbar.querySelector('[data-ann-action="link"]');
+      if (btnLk) btnLk.click();
+      return;
+    }
     if (!action) return;
     e.preventDefault();
     var start = area.selectionStart, end = area.selectionEnd;
@@ -8188,15 +9069,26 @@ function sortedUnique(arr) {
   });
 }
 
+// #SEC5: Escape ALL five HTML-significant characters here so this is safe in
+// either text *or* attribute context. The earlier split (escapeHtmlText for
+// text, escapeHtmlAttr layering "→&quot; on top) created a foot-gun: a
+// future PR could call escapeHtmlText for an attribute insertion and silently
+// introduce XSS. The perf hit of two extra replaces is negligible; the
+// reduced cognitive load is worth more.
 function escapeHtmlText(s) {
   return safeStr(s)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
+// Retained as an alias for code that wants to express "this is attribute
+// context" at the call site. escapeHtmlText is now equally safe; this
+// alias documents intent without changing behavior.
 function escapeHtmlAttr(s) {
-  return escapeHtmlText(s).replace(/"/g, "&quot;");
+  return escapeHtmlText(s);
 }
 
 function inferPackageRoot(files) {

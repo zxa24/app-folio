@@ -39,6 +39,30 @@
     proxyUrl: "http://127.0.0.1:8787/translate"
   };
 
+  // #SEC4: Whitelist of host:port origins translate endpoints are allowed
+  // to point at. localStorage is in-origin scriptable, so without this gate
+  // any code with same-origin access can rewrite googleWebEndpoint/proxyUrl
+  // to an exfil server and harvest every subsequent translation. Only
+  // additions go through configureInteractively, which calls a confirm()
+  // before persisting (see ensureEndpointAllowed below).
+  const ENDPOINT_HOST_ALLOWLIST = [
+    "translate.googleapis.com",
+    "translation.googleapis.com",
+    "127.0.0.1",
+    "localhost"
+  ];
+
+  function isEndpointAllowed(rawUrl) {
+    if (!rawUrl) return false;
+    try {
+      const u = new URL(rawUrl);
+      if (ENDPOINT_HOST_ALLOWLIST.indexOf(u.hostname) >= 0) return true;
+      // Loopback ranges 127.0.0.0/8 are accepted to cover odd host setups.
+      if (/^127\./.test(u.hostname)) return true;
+      return false;
+    } catch (e) { return false; }
+  }
+
   let running = false;
 
   if (document.readyState === "loading") {
@@ -139,6 +163,21 @@
     if (direction === "zh-en") {
       next.sourceLang = "zh-CN";
       next.targetLang = "en";
+      return next;
+    }
+    // Traditional → Simplified (zh-TW → zh-CN). Google Translate
+    // handles the cross-script conversion when language hints are
+    // explicit on both ends; using "auto" for either side would let
+    // Google fall back to the document's overall language guess and
+    // skip the script transform on shorter strings.
+    if (direction === "tw-cn" || direction === "tc-sc") {
+      next.sourceLang = "zh-TW";
+      next.targetLang = "zh-CN";
+      return next;
+    }
+    if (direction === "cn-tw" || direction === "sc-tc") {
+      next.sourceLang = "zh-CN";
+      next.targetLang = "zh-TW";
       return next;
     }
     return null;
@@ -291,6 +330,21 @@
     out.googleWebEndpoint = safeStr(out.googleWebEndpoint || DEFAULT_CONFIG.googleWebEndpoint).trim();
     out.googleEndpoint = safeStr(out.googleEndpoint || DEFAULT_CONFIG.googleEndpoint).trim();
     out.proxyUrl = safeStr(out.proxyUrl || DEFAULT_CONFIG.proxyUrl).trim();
+    // #SEC4: Reject any persisted endpoint that points outside the host
+    // allowlist. Falls back to the corresponding DEFAULT_CONFIG entry and
+    // logs to the console so the silent reversion is visible during dev.
+    if (!isEndpointAllowed(out.googleWebEndpoint)) {
+      console.warn("[dev-translate] googleWebEndpoint not in allowlist, reverting:", out.googleWebEndpoint);
+      out.googleWebEndpoint = DEFAULT_CONFIG.googleWebEndpoint;
+    }
+    if (!isEndpointAllowed(out.googleEndpoint)) {
+      console.warn("[dev-translate] googleEndpoint not in allowlist, reverting:", out.googleEndpoint);
+      out.googleEndpoint = DEFAULT_CONFIG.googleEndpoint;
+    }
+    if (!isEndpointAllowed(out.proxyUrl)) {
+      console.warn("[dev-translate] proxyUrl not in allowlist, reverting:", out.proxyUrl);
+      out.proxyUrl = DEFAULT_CONFIG.proxyUrl;
+    }
     return out;
   }
 
@@ -410,7 +464,9 @@
     );
   }
 
-  async function runAutoTranslate() {
+  async function runAutoTranslate(opts) {
+    const automation = opts || {};
+    const silent = !!automation.silent;
     const bridge = getBridge();
     const btn = document.getElementById("autoTranslateBtn");
     const label = document.getElementById("translateBtnLabel");
@@ -432,40 +488,45 @@
     let maskedList;
 
     if (!bridge) {
-      alert("Dev bridge not ready. Refresh page and retry.");
-      return;
+      if (!silent) alert("Dev bridge not ready. Refresh page and retry.");
+      return { ok: false, reason: "no_bridge" };
     }
     if (!bridge.isPackageLoaded()) {
-      alert("Load a translation package first.");
-      return;
+      if (!silent) alert("Load a translation package first.");
+      return { ok: false, reason: "no_package" };
     }
     if (running) {
-      return;
+      return { ok: false, reason: "already_running" };
     }
 
     try {
       provider = await prepareProviderContext(loadConfig());
     } catch (err) {
-      alert(safeStr(err && err.message) || "Provider configuration is invalid.");
-      return;
+      if (!silent) alert(safeStr(err && err.message) || "Provider configuration is invalid.");
+      return { ok: false, reason: "provider_config", error: safeStr(err && err.message) };
     }
     cfg = provider.cfg;
+    if (automation.overwriteExisting !== undefined) {
+      cfg.overwriteExisting = !!automation.overwriteExisting;
+    }
     saveConfig(cfg);
 
     rows = Array.isArray(bridge.getRows()) ? bridge.getRows() : [];
     candidates = filterCandidates(rows, cfg);
     if (candidates.length === 0) {
-      alert("No eligible segments to auto-translate under current config.");
-      return;
+      if (!silent) alert("No eligible segments to auto-translate under current config.");
+      return { ok: true, candidates: 0, updated: 0, skipped: 0, failed: 0 };
     }
 
-    const directionLabel = buildDirectionSummaryText(cfg);
-    if (!window.confirm(
-      "Auto-translate " + String(candidates.length) + " segments?\n" +
-      "Direction: " + directionLabel + "\n" +
-      "Provider: " + cfg.provider
-    )) {
-      return;
+    if (!silent) {
+      const directionLabel = buildDirectionSummaryText(cfg);
+      if (!window.confirm(
+        "Auto-translate " + String(candidates.length) + " segments?\n" +
+        "Direction: " + directionLabel + "\n" +
+        "Provider: " + cfg.provider
+      )) {
+        return { ok: false, reason: "user_cancelled" };
+      }
     }
 
     running = true;
@@ -515,12 +576,14 @@
         "[AUTO] Translation complete: " + String(totalUpdated) + " updated, " +
         String(totalSkipped) + " skipped, " + String(totalFailed) + " failed"
       );
-      alert(
-        "Auto-translation finished!\n\n" +
-        "✓ Updated: " + String(totalUpdated) + "\n" +
-        "○ Skipped: " + String(totalSkipped) + "\n" +
-        "✗ Failed: " + String(totalFailed)
-      );
+      if (!silent) {
+        alert(
+          "Auto-translation finished!\n\n" +
+          "✓ Updated: " + String(totalUpdated) + "\n" +
+          "○ Skipped: " + String(totalSkipped) + "\n" +
+          "✗ Failed: " + String(totalFailed)
+        );
+      }
       if (statusBefore) {
         window.setTimeout(() => {
           const curBridge = getBridge();
@@ -532,11 +595,14 @@
     } catch (err) {
       console.error(err);
       bridge.setStatusText("[AUTO] Translation failed: " + safeStr(err && err.message));
-      alert(
-        "Auto-translation failed:\n\n" +
-        safeStr(err && err.message) +
-        "\n\nTip: Click Advanced Settings to configure provider."
-      );
+      if (!silent) {
+        alert(
+          "Auto-translation failed:\n\n" +
+          safeStr(err && err.message) +
+          "\n\nTip: Click Advanced Settings to configure provider."
+        );
+      }
+      return { ok: false, reason: "translation_error", error: safeStr(err && err.message) };
     } finally {
       running = false;
       if (btn) {
@@ -546,7 +612,33 @@
         label.textContent = originalLabel || "Auto Translate";
       }
     }
+    return { ok: true, candidates: candidates.length, updated: totalUpdated, skipped: totalSkipped, failed: totalFailed };
   }
+
+  // Public API for automation: lets app.js / Playwright drive a silent run
+  // with a chosen direction (zh-en / en-zh) without confirm/alert dialogs.
+  window.__devTranslateRun = async function (opts) {
+    const o = opts || {};
+    const direction = o.direction || "";
+    // Delegate validation to applyQuickDirection so every direction code
+    // it supports (zh-en, en-zh, tw-cn, tc-sc, cn-tw, sc-tc) flows through
+    // the automation bridge. Previously this branch hard-coded the
+    // English ↔ zh-CN pair, silently swallowing any TC/SC direction
+    // and letting the run inherit whatever config the operator left
+    // behind — usually the default en → zh-CN, which mistranslates
+    // when the source is actually Traditional Chinese.
+    if (direction) {
+      const cfgNext = applyQuickDirection(loadConfig(), direction);
+      if (cfgNext) {
+        saveConfig(cfgNext);
+        updateButtonLabelFromConfig(cfgNext);
+      }
+    }
+    return await runAutoTranslate({
+      silent: o.silent !== false,
+      overwriteExisting: o.overwriteExisting
+    });
+  };
 
   function batchToPayload(batch, maskedList, translatedBatch) {
     const out = [];
@@ -787,10 +879,28 @@
     }
   }
 
+  // #SEC11: Decode the small set of entities Google Translate emits in
+  // response text. Earlier this used `textarea.innerHTML = ...` which is
+  // safe (textarea is RCDATA, content never parses as HTML), but the
+  // pattern is review-hostile — it looks like an innerHTML sink even though
+  // it isn't, and an unfamiliar reviewer might "fix" it the wrong way.
+  // Explicit replacements remove that footgun. Includes numeric entities
+  // because some translations come back with "&#39;" etc.
   function decodeHtmlEntities(text) {
-    const area = document.createElement("textarea");
-    area.innerHTML = safeStr(text);
-    return area.value;
+    return safeStr(text)
+      .replace(/&#(\d+);/g, function (_, n) {
+        const code = parseInt(n, 10);
+        return Number.isFinite(code) ? String.fromCodePoint(code) : "";
+      })
+      .replace(/&#x([0-9a-fA-F]+);/g, function (_, n) {
+        const code = parseInt(n, 16);
+        return Number.isFinite(code) ? String.fromCodePoint(code) : "";
+      })
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&");  // last so we don't double-decode
   }
 
   function clampInt(v, min, max, fallback) {
