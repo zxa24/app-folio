@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <script>
+    (function () {
+      var key = "translator_app.theme_mode";
+      var mode = "system";
+      var effective = "light";
+      var mq;
+      try {
+        mode = localStorage.getItem(key) || "system";
+      } catch (e) {}
+      if (mode !== "system" && mode !== "light" && mode !== "dark") {
+        mode = "system";
+      }
+      if (mode === "system") {
+        mq = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+        effective = mq && mq.matches ? "dark" : "light";
+      } else {
+        effective = mode;
+      }
+      document.documentElement.setAttribute("data-theme-mode", mode);
+      document.documentElement.setAttribute("data-theme-effective", effective);
+    })();
+  </script>
+  <title>Translator MVP</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="left-actions">
+      <label class="btn" for="packageInput">Open Package Folder</label>
+      <input id="packageInput" type="file" webkitdirectory directory multiple />
+      <label class="btn primary" for="packageZipInput">Open Package ZIP</label>
+      <input id="packageZipInput" type="file" accept=".zip,application/zip" />
+      <label class="btn" for="progressInput">Load Progress JSON</label>
+      <input id="progressInput" type="file" accept=".json,application/json" />
+      <div class="translate-dropdown-wrap">
+        <button id="autoTranslateBtn" class="btn translate-btn" type="button">
+          <span class="translate-icon">&#x1F310;</span>
+          <span id="translateBtnLabel">Auto Translate</span>
+          <span class="dropdown-arrow">&#x25BC;</span>
+        </button>
+        <div id="translateDropdown" class="translate-dropdown hidden">
+          <button type="button" class="translate-option" data-direction="en-zh">English → 简体中文</button>
+          <button type="button" class="translate-option" data-direction="zh-en">简体中文 → English</button>
+          <div class="translate-divider"></div>
+          <button type="button" class="translate-option" data-action="config">
+            <span class="config-icon">&#x2699;</span>
+            Advanced Settings
+          </button>
+        </div>
+      </div>
+      <button id="saveAllBtn" class="btn" disabled>Save Outputs</button>
+      <button id="savePackageZipBtn" class="btn success" disabled>Save Package ZIP</button>
+      <button id="exportPdfBtn" class="btn" disabled>Export PDF</button>
+      <button id="drawHotspotBtn" class="btn" disabled>Draw Hotspot</button>
+    </div>
+    <div class="right-actions">
+      <button id="themeModeBtn" class="btn tiny" type="button">Theme: System</button>
+      <div id="packageStatus" class="status">No package loaded</div>
+    </div>
+  </header>
+
+  <main class="main-layout">
+    <section class="pdf-panel">
+      <div class="panel-head">
+        <h2>PDF Preview + Hotspots</h2>
+        <div class="page-controls">
+          <button id="prevPageBtn" class="btn tiny">Prev</button>
+          <span id="pageLabel">Page - / -</span>
+          <label class="zoom-wrap" for="zoomPercentInput">
+            <input id="zoomPercentInput" class="tiny-zoom" type="number" min="25" max="400" step="5" value="100" />
+            <span>%</span>
+          </label>
+          <button id="nextPageBtn" class="btn tiny">Next</button>
+        </div>
+      </div>
+
+      <div id="pdfStage" class="pdf-stage">
+        <canvas id="pdfCanvas" class="pdf-canvas" aria-label="PDF page preview"></canvas>
+        <div id="hotspotLayer" class="hotspot-layer"></div>
+        <div id="emptyPdfHint" class="empty-hint">
+          Open a translation package folder to load `preview.pdf` and `segments.json`.
+        </div>
+      </div>
+    </section>
+
+    <section class="right-panel">
+      <div class="tab-head">
+        <button id="segmentsTabBtn" class="tab-btn active">Segments</button>
+        <button id="aiTabBtn" class="tab-btn">AI Handoff</button>
+        <button id="projectMetaTabBtn" class="tab-btn">Project</button>
+      </div>
+
+      <div id="segmentsTab" class="tab-content active">
+        <div class="filters">
+          <input id="searchInput" type="text" placeholder="Search source/target/tid..." />
+          <select id="editorViewMode">
+            <option value="page_cards">Card(Current Page)</option>
+            <option value="classic">Classic</option>
+          </select>
+          <select id="pageFilter"></select>
+          <select id="styleFilter"></select>
+          <div class="text-filter-wrap">
+            <button id="textFilterBtn" type="button" class="btn tiny">Card Options</button>
+            <div id="textFilterPanel" class="text-filter-panel hidden">
+              <label class="switch-row" for="filterHiddenObjects">
+                <span>Hide hidden objects</span>
+                <span class="switch">
+                  <input id="filterHiddenObjects" type="checkbox" />
+                  <span class="slider"></span>
+                </span>
+              </label>
+              <label class="switch-row" for="filterSimpleText">
+                <span>Filter number/punctuation/whitespace</span>
+                <span class="switch">
+                  <input id="filterSimpleText" type="checkbox" />
+                  <span class="slider"></span>
+                </span>
+              </label>
+              <label class="switch-row" for="filterEmptySource">
+                <span>Hide empty source paragraphs</span>
+                <span class="switch">
+                  <input id="filterEmptySource" type="checkbox" />
+                  <span class="slider"></span>
+                </span>
+              </label>
+              <label class="switch-row" for="formatAwareSoftBreakMerge" title="Soft-break sub-segments only auto-merge when font / weight / size / color match on both sides. Default ON to align with InDesign import.">
+                <span>Format-aware soft-break merge</span>
+                <span class="switch">
+                  <input id="formatAwareSoftBreakMerge" type="checkbox" />
+                  <span class="slider"></span>
+                </span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div id="segmentsSummary" class="summary">Segments: 0</div>
+        <div id="cardsView" class="cards-view"></div>
+
+        <div id="classicView" class="classic-view hidden">
+          <div id="segmentList" class="segment-list"></div>
+
+          <div class="editor">
+            <h3>Segment Editor</h3>
+            <div id="editorEmpty" class="muted">Select a segment from list or hotspot.</div>
+
+            <div id="editorFields" class="editor-fields hidden">
+              <label>TID</label>
+              <input id="tidInput" type="text" readonly />
+
+              <label>Source</label>
+              <textarea id="sourceInput" rows="4" readonly></textarea>
+
+              <label>Target</label>
+              <textarea id="targetInput" rows="5"></textarea>
+
+              <div class="inline-2">
+                <div>
+                  <label>Status</label>
+                  <select id="statusInput">
+                    <option value="todo">todo</option>
+                    <option value="translated">translated</option>
+                    <option value="reviewed">reviewed</option>
+                    <option value="skip">skip</option>
+                    <option value="merge_tail" disabled>merge_tail</option>
+                  </select>
+                </div>
+                <div>
+                  <label>Notes</label>
+                  <input id="notesInput" type="text" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="aiTab" class="tab-content">
+        <div class="summary" id="aiSummary">AI handoff rows: 0</div>
+        <div id="aiList" class="ai-list"></div>
+      </div>
+
+      <div id="projectMetaTab" class="tab-content">
+        <div class="summary" id="projectMetaStatus">No package loaded</div>
+        <div id="projectMetaFields" class="editor-fields project-meta-fields hidden">
+          <label title="Human-readable project name. Editable. Travels in the package _meta.json.">Project name</label>
+          <input id="pmProjectName" type="text" maxlength="200" placeholder="Project name" />
+
+          <div class="inline-2">
+            <div>
+              <label title="Source content language. Options match the InDesign toolkit's supported languages (lang_script_table).">Source language</label>
+              <select id="pmSourceLang"></select>
+            </div>
+            <div>
+              <label title="Target content language. Options match the InDesign toolkit. May be empty only when workflow is edit-only.">Target language</label>
+              <select id="pmTargetLang"></select>
+            </div>
+          </div>
+
+          <div class="inline-2">
+            <div>
+              <label title="translation: source→target. edit-only: single-language pass (target may be empty). bilingual: parallel two-language content.">Workflow</label>
+              <select id="pmWorkflowMode">
+                <option value="translation">translation</option>
+                <option value="edit-only">edit-only</option>
+                <option value="bilingual">bilingual</option>
+              </select>
+            </div>
+            <div>
+              <label title="Optional project deadline (YYYY-MM-DD). Editable.">Deadline</label>
+              <input id="pmDeadline" type="date" />
+            </div>
+          </div>
+
+          <label title="Translator (web handler). Auto-filled from your remembered name; type to override.">Translator</label>
+          <input id="pmTranslator" type="text" maxlength="200" placeholder="Your name" />
+          <div id="pmTranslatorRemember" class="pm-remember muted"></div>
+
+          <label title="Designer (InDesign handler). Set automatically when the package is exported from InDesign. Read-only here.">Designer</label>
+          <input id="pmDesigner" type="text" placeholder="(set on InDesign export)" readonly />
+
+          <div id="pmProjectId" class="pm-projectid muted" title="Stable project id stored in the package _meta.json."></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="./vendor/pdf.min.js"></script>
+  <script src="./vendor/jspdf.umd.min.js"></script>
+  <!-- fflate UMD + ZipCore wrapper for Open/Save Package ZIP. Must load
+       before app.js so els bindings and zip helpers can reach ZipCore. -->
+  <script src="./vendor/fflate.umd.js"></script>
+  <script src="./lib/zip_core.js"></script>
+  <!-- Embedded Simplified Chinese fonts (base64). Loaded via <script> so PDF
+       export works under file:// where fetch/XHR of local binaries is blocked.
+       Generated by vendor/build_font_embed.js (~14 MB each). -->
+  <script src="./vendor/NotoSansSC-Regular.font.js"></script>
+  <script src="./vendor/NotoSansSC-Bold.font.js"></script>
+  <!-- Phase 7-SC: DOM-driven measurement module. Must load before app.js. -->
+  <script src="./lib/dom_text_measure.js"></script>
+  <!-- Phase 8B+8C: format-paint scaffolding (renders source emphasis + suggests target) -->
+  <script src="./lib/emphasis_overlay.js"></script>
+  <!-- A3a' (project_meta): browser-local UX prefs + the _meta core lib chain.
+       Must load before app.js. ProjectMeta needs its 3 deps as globals
+       (SHA256Pure / BCP47 / JSONSchemaMinimal) first, then the JS-wrapped
+       schema (file:// can't fetch the .json). app.js calls ProjectMeta.setSchema
+       at init. -->
+  <script src="./vendor/local_prefs.js"></script>
+  <script src="./vendor/sha256_pure.js"></script>
+  <script src="./vendor/bcp47_validate.js"></script>
+  <script src="./vendor/json_schema_minimal.js"></script>
+  <script src="./vendor/project_meta.js"></script>
+  <script src="./vendor/project_meta_schema.js"></script>
+  <!-- Working-state persistence: independent IDB CAS store (needs sha256_pure
+       + project_meta above for canonical hashing). Spec: webapp_persistence. -->
+  <script src="./vendor/working_state_store.js"></script>
+  <script src="./app.js"></script>
+  <script src="./dev_translate.js"></script>
+</body>
+</html>

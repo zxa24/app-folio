@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>翻译落版管线 · 开发日志 / Translation Pipeline · Dev Log</title>
+<style>
+  :root{
+    --bg:#0e1116; --bg2:#151a22; --panel:#1b212b; --line:#2a323f; --ink:#e7edf5; --dim:#9aa7b8;
+    --feature:#4aa3ff; --milestone:#f7c948; --version:#36c5a3; --retro:#b98cff; --deadend:#ff8a5c; --probe:#7d8aa0; --event:#5fbf83;
+    --shadow:0 6px 22px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,"Segoe UI",Roboto,"Noto Sans SC",sans-serif;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+  .topinner{max-width:1500px;margin:0 auto;padding:12px 18px}
+
+  header.top{flex:0 0 auto;background:var(--bg);border-bottom:1px solid var(--line)}
+  .titlerow{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  h1{margin:0;font-size:22px;font-weight:700;letter-spacing:.2px}
+  .sub{color:var(--dim);font-size:12.5px;margin-top:3px;max-width:780px}
+  .langtog{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .langtog button{background:transparent;color:var(--dim);border:0;padding:6px 12px;cursor:pointer;font-weight:600;font-size:12.5px}
+  .langtog button.on{background:var(--feature);color:#06223f}
+  .toplinks{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
+  .toplink{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--bg2);color:var(--ink);border-radius:8px;padding:6px 12px;font-size:12.5px;font-weight:600;text-decoration:none;white-space:nowrap}
+  .toplink:hover{border-color:#3a4658;background:#1b2230}
+  .toplink.primary{background:var(--feature);color:#06223f;border-color:var(--feature)}
+  .toplink.primary:hover{filter:brightness(1.08);background:var(--feature)}
+
+  .metarow{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:10px}
+  .legend{display:flex;gap:6px;flex-wrap:wrap}
+  .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--bg2);border-radius:20px;padding:4px 11px;font-size:12px;color:var(--dim);cursor:pointer;user-select:none}
+  .chip .dot{width:9px;height:9px;border-radius:50%}
+  .chip.off{opacity:.32;text-decoration:line-through}
+  .heat{display:flex;gap:14px;align-items:center;margin-left:auto;font-size:11px;color:var(--dim)}
+  .heatgrid{display:flex;gap:3px}
+  .hcell{width:22px;height:22px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;color:#0c0f14;font-weight:700}
+
+  .canvas{flex:1 1 auto;overflow:auto;cursor:grab;touch-action:none;position:relative}
+  .canvas.dragging{cursor:grabbing}
+  .canvas.dragging *{cursor:grabbing !important}
+  .stage{min-width:1120px;padding:0 18px 90px;user-select:none}
+  .pipeline{position:sticky;top:0;z-index:30;display:grid;grid-template-columns:repeat(7,1fr);gap:8px;background:var(--bg);padding:10px 0 8px;box-shadow:0 8px 16px -10px rgba(0,0,0,.7)}
+  .lanehead{position:relative;text-align:center;padding:8px 6px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;cursor:help}
+  .lanehead .n{font-size:10px;color:var(--probe);font-weight:700}
+  .lanehead .t{font-size:12.5px;font-weight:600;margin-top:2px}
+  .lanehead::after{content:"\2192";position:absolute;right:-7px;top:50%;transform:translateY(-50%);color:var(--line);font-size:15px;z-index:2}
+  .lanehead:last-child::after{display:none}
+  .lanehead .tip{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%) translateY(-4px);width:210px;max-width:46vw;background:#0c1017;border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:11.5px;line-height:1.55;color:var(--dim);text-align:left;box-shadow:var(--shadow);opacity:0;pointer-events:none;transition:.13s;z-index:70}
+  .lanehead:hover{border-color:#3a4658}
+  .lanehead:hover .tip{opacity:1;transform:translateX(-50%) translateY(0)}
+  .lanehead .tip::before{content:"";position:absolute;bottom:100%;left:50%;transform:translateX(-50%);border:6px solid transparent;border-bottom-color:#0c1017}
+
+  .phase{padding:6px 0 2px;border-bottom:1px dashed var(--line)}
+  .phase-head{display:flex;align-items:baseline;gap:10px;padding:14px 2px 8px}
+  .phase-head .lbl{font-size:14.5px;font-weight:700}
+  .phase-head .dt{font-size:11.5px;color:var(--probe);font-family:ui-monospace,monospace}
+  .phase-head .ln{flex:1;height:1px;background:linear-gradient(90deg,var(--line),transparent)}
+  .phase-sum{color:var(--dim);font-size:12.5px;line-height:1.55;margin:-2px 2px 12px;max-width:1120px}
+  .lane-row{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:8px}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;
+    transition:transform .08s,box-shadow .12s,border-color .12s;position:relative;min-width:0}
+  .card:hover{transform:translateY(-2px);box-shadow:var(--shadow);border-color:#3a4658}
+  .tpill{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;color:var(--dim);letter-spacing:.3px}
+  .tpill .d{width:8px;height:8px;border-radius:50%;background:var(--tc)}
+  .card .ct{font-size:13px;font-weight:650;line-height:1.34;margin-top:5px}
+  .card .cp{font-size:12px;color:var(--dim);margin-top:5px;line-height:1.45}
+  .card .cthumb{margin-top:8px;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:#0b0e13;max-height:132px}
+  .card .cthumb img{display:block;width:100%;height:auto;-webkit-user-drag:none;user-select:none}
+  .card .crow{display:flex;align-items:center;gap:6px;margin-top:9px;flex-wrap:wrap}
+  .tag{font-size:10px;padding:1px 6px;border-radius:5px;border:1px solid var(--line);color:var(--dim)}
+  .tag.ver{color:var(--version);border-color:#235}
+  .tag.hash{font-family:ui-monospace,monospace;color:var(--probe)}
+  .badge{font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:5px}
+  .b-landed{background:#10331f;color:#5ad08a}
+  .b-mergeq{background:#0e2a40;color:#6cb8ff}
+  .b-active{background:#3a2c08;color:#ffcf5a}
+  .b-archived{background:#26262b;color:#9aa}
+  .b-probe{background:#2a1f3a;color:#c4a6ff}
+  .t-milestone{background:linear-gradient(180deg,#241f10,#1b212b 65%);border-color:#4a4022}
+  .t-deadend{border-style:dashed;border-color:#5c3a2a}
+  .t-probe{border-style:dotted;opacity:.95}
+  .t-retro{background:linear-gradient(180deg,#1d1730,#1b212b 70%)}
+  .cthead{display:flex;align-items:center;gap:6px;justify-content:space-between}
+  .card.keystone{border-color:var(--milestone);box-shadow:0 0 0 1px rgba(247,201,72,.5),0 8px 24px rgba(247,201,72,.12)}
+  .card.keystone:hover{box-shadow:0 0 0 1px var(--milestone),0 12px 30px rgba(247,201,72,.22)}
+  .kbadge{flex:0 0 auto;display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:800;color:#1a1407;background:var(--milestone);border-radius:5px;padding:1px 6px;letter-spacing:.3px}
+
+  .scrim{position:fixed;inset:0;background:rgba(0,0,0,.62);display:flex;align-items:center;justify-content:center;padding:24px;
+    opacity:0;pointer-events:none;transition:.16s;z-index:50}
+  .scrim.on{opacity:1;pointer-events:auto}
+  .modal{width:min(960px,96vw);max-height:84vh;background:var(--bg2);border:1px solid var(--line);border-radius:14px;
+    overflow:hidden;display:flex;box-shadow:0 24px 80px rgba(0,0,0,.65);transform:scale(.97);transition:transform .16s}
+  .scrim.on .modal{transform:none}
+  .modal.solo{width:min(446px,94vw)}
+  .mImg{flex:1 1 54%;min-width:0;background:#0b0e13;display:flex;align-items:center;justify-content:center;padding:18px}
+  .mImg img{max-width:100%;max-height:78vh;border-radius:8px;-webkit-user-drag:none;user-select:none}
+  .mBody{flex:1 1 46%;padding:22px 24px 30px;overflow-y:auto;position:relative}
+  .mclose{position:absolute;top:12px;right:14px;background:var(--panel);border:1px solid var(--line);color:var(--dim);border-radius:7px;width:30px;height:30px;cursor:pointer;font-size:17px;z-index:2}
+  .mBody .dline{font-family:ui-monospace,monospace;color:var(--probe);font-size:12px}
+  .mBody .ct{font-size:19px;font-weight:700;margin:3px 0 8px;line-height:1.3}
+  .dmeta{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 6px}
+  .story{margin-top:16px;border-top:1px solid var(--line);padding-top:14px}
+  .story p{margin:0 0 12px;font-size:14px;line-height:1.75;color:#dde6f1}
+  .story p:last-child{margin-bottom:0}
+  @media(max-width:680px){ .modal{flex-direction:column;max-height:92vh} .mImg{flex:0 0 auto} }
+  @media(max-width:560px){ h1{font-size:18px} .sub{display:none} .heat{display:none} }
+  footer{color:var(--probe);font-size:11px;text-align:center;padding:26px 0 0}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="topinner">
+    <div class="titlerow">
+      <h1 id="h-title"></h1>
+      <div class="toplinks">
+        <div class="langtog">
+          <button id="lang-zh" onclick="setLang('zh')">中文</button>
+          <button id="lang-en" onclick="setLang('en')">EN</button>
+        </div>
+        <a class="toplink primary" id="link-webapp" href="https://zxa24.github.io/app-folio/" target="_blank" rel="noopener"></a>
+        <a class="toplink" href="https://github.com/zxa24/app-folio" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+    </div>
+    <div class="sub" id="h-sub"></div>
+    <div class="metarow">
+      <div class="legend" id="legend"></div>
+      <div class="heat" id="heat"></div>
+    </div>
+  </div>
+</header>
+
+<div class="canvas" id="canvas">
+  <div class="stage">
+    <div class="pipeline" id="pipeline"></div>
+    <div id="phases"></div>
+    <footer id="foot"></footer>
+  </div>
+</div>
+
+<div class="scrim" id="scrim" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modal"></div>
+</div>
+
+<script>
+const STR = {
+  title:{zh:"翻译落版管线 · 开发日志",en:"Translation Layout Pipeline · Dev Log"},
+  sub:{zh:"这是一条把版式文档在中英之间翻译落版的管线：从 InDesign 导出待翻译包，让译者在浏览器里离线编辑，再把译文连同格式精准写回 InDesign。本页是它的开发日志——横轴是工作流管线（源导出 → 译者编辑 → 回写 → 排版 → 交付复用），纵轴是时间；每张卡片是一块功能、决策或弯路，点开看它解决了什么。一个人做，2026 年 2–6 月、893 次提交。",
+       en:"A layout pipeline for translating formatted documents between English and Chinese: export a translation package out of InDesign, let translators edit it offline in a browser, then write the translation — formatting and all — precisely back into InDesign. This page is its dev log: the horizontal axis is the workflow pipeline (export → translate → write-back → typography → delivery/reuse), the vertical axis is time; each card is a feature, decision, or dead-end you can open for the story. Built solo, Feb–Jun 2026, 893 commits."},
+  webapp:{zh:"▶ 试用工具",en:"▶ Live tool"},
+  foot:{zh:"部分卡片附诊断截图（脱敏后）· 数据锚自真实 git 提交史",en:"Select cards include redacted diagnostic screenshots · anchored to real git history"},
+  commit:{zh:"提交",en:"commit"},
+  keystone:{zh:"基石",en:"Keystone"},
+};
+const LANES = [
+  {n:"L1",zh:"源导出",en:"Export",
+   desc:{zh:"从 InDesign 工程把待翻译的文字、版式、预览图打包导出，交给译者。",en:"Pull translatable text, layout and a preview out of the InDesign project into a package for the translator."}},
+  {n:"L2",zh:"对齐",en:"Alignment",
+   desc:{zh:"把译文和原文逐段对应起来，确定每句中文该落到哪一段。",en:"Match the translation to the source paragraph by paragraph — deciding where each line belongs."}},
+  {n:"L3",zh:"译者编辑",en:"Translator",
+   desc:{zh:"译者在浏览器里对着原版 PDF 改译文、标强调、校对版式。",en:"Translators edit the translation, mark emphasis and proof layout against the PDF, in a browser."}},
+  {n:"L4",zh:"回写导入",en:"Write-back",
+   desc:{zh:"把译者改好的内容精准写回 InDesign 工程的对应位置。",en:"Write the translator's edits back into the exact spots in the InDesign project."}},
+  {n:"L5",zh:"排版合规",en:"Typography",
+   desc:{zh:"按品牌规则纠正中/英/数字字体、字重，和强调格式。",en:"Fix CJK / Latin / digit fonts, weights and emphasis formatting to the brand rules."}},
+  {n:"L6",zh:"版面修复",en:"Layout/Review",
+   desc:{zh:"处理文字溢出、错位、遮挡，导出可审阅的 PDF。",en:"Resolve overset, misalignment and overlaps; export a review PDF."}},
+  {n:"L7",zh:"交付复用",en:"Delivery/Reuse",
+   desc:{zh:"定稿留证、打包归档，并把成果复用到其它文档。",en:"Finalize with evidence, package and archive, and reuse the result on other documents."}},
+];
+const TYPES = {
+  feature :{zh:"功能",en:"Feature",c:"var(--feature)"},
+  event   :{zh:"事件",en:"Event",c:"var(--event)"},
+  version :{zh:"版本迭代",en:"Version",c:"var(--version)"},
+  retro   :{zh:"复盘",en:"Retro",c:"var(--retro)"},
+  deadend :{zh:"弯路/转向",en:"Pivot",c:"var(--deadend)"},
+};
+const STATUS = {
+  landed   :{zh:"已落地",en:"Shipped",cls:"b-landed"},
+  "merge-queued":{zh:"待合并",en:"Merge-queued",cls:"b-mergeq"},
+  active   :{zh:"进行中",en:"Active",cls:"b-active"},
+  archived :{zh:"已归档",en:"Archived",cls:"b-archived"},
+  probe    :{zh:"待评估",en:"Eval",cls:"b-probe"},
+};
+const HEAT = { IT:{ "02":112,"03":58,"04":305,"05":69,"06":259 }, folio:{ "05":22,"06":68 } };
+const PHASES = [
+  {id:"P1",   zh:"Phase 1 · 批量编辑 MVP",   en:"Phase 1 · Batch-Edit MVP",        date:"2026-02-13",
+   sum:{zh:"项目起步——先做出一个能批量改字、又能保住原排版样式的可用工具，验证整条路走得通。",en:"Kickoff — a usable tool that edits text in bulk while preserving the original styling, proving the whole approach works."}},
+  {id:"P2",   zh:"Phase 2 · 两段式对齐",     en:"Phase 2 · Two-Stage Alignment",   date:"2026-02-15",
+   sum:{zh:"押注全自动对齐：先英英、再英中，把中文译文「投影」回原稿的对应段落。",en:"A bet on full auto-alignment: EN↔EN then EN↔ZH, projecting the translation back onto the matching source paragraphs."}},
+  {id:"PILOT",zh:"试点 · 离线翻译包 + 转向", en:"Pilot · Offline Package & Pivot", date:"2026-02-19 ~ 27",
+   sum:{zh:"并行试一条更简单的「稳定 ID」路线，验证后果断放弃模糊对齐、转向它——这就是今天产品的形态。",en:"Trialed a simpler stable-ID route in parallel, then decisively pivoted to it over fuzzy alignment — the shape of today's product."}},
+  {id:"UXP",  zh:"Phase 0.5 · UXP 迁移",     en:"Phase 0.5 · UXP Migration",       date:"2026-03-07",
+   sum:{zh:"把整套工具迁到 Adobe 新一代 UXP 技术，给后续所有功能铺一个面向未来的地基。",en:"Ported the whole toolkit onto Adobe's next-gen UXP runtime — a future-proof foundation for everything after."}},
+  {id:"P8",   zh:"Phase 8 · 强调/脚本/AI",   en:"Phase 8 · Emphasis / Script / AI",date:"2026-04-25 ~ 30",
+   sum:{zh:"攻克强调格式：自动识别中英混排、把粗斜体结构化收集，连机器翻译也能保住格式不跑偏。",en:"Cracked emphasis: auto-detect mixed scripts, structure-capture bold/italic, and keep formatting intact even through machine translation."}},
+  {id:"SPLIT",zh:"5 月 · 拆仓 + ZIP/安全 + UI",en:"May · Split + ZIP/Security + UI", date:"2026-05-01 ~ 28",
+   sum:{zh:"译者端独立成自己的仓库，补上整包一键传输与对外可用的安全基线。",en:"The front-end became its own repo, gaining one-click whole-package transfer and an externally-usable security baseline."}},
+  {id:"HARDEN",zh:"实战硬化 + 审计",          en:"Campaign Hardening + Audit",       date:"2026-05-25 ~ 27",
+   sum:{zh:"在一个真实大客户项目里硬化，并定下「不擅自加格式」的核心政策与自动审查质量门。",en:"Hardened on a real client campaign, setting the core 'no unmarked formatting' policy and an automated-review quality gate."}},
+  {id:"LOOP", zh:"6 月初 · 全管线闭环",      en:"Early June · Closing the Loop",    date:"2026-06-01",
+   sum:{zh:"第一次跑通「改完再导出、二次导入」的往返，连校对在内的全管线第一次形成闭环。",en:"First successful 'export-again, import-again' round-trip — the full pipeline, proofreading included, closed into a loop for the first time."}},
+  {id:"META", zh:"6 月 · 元数据 + 持久化",   en:"June · Meta + Persistence",        date:"2026-06-07 ~ 15",
+   sum:{zh:"搭起项目元数据与可靠的工作态持久化（崩溃不丢、切项目安全），为跨文档复用打底。",en:"Built project metadata and reliable work-state persistence (crash-safe, project-safe) to underpin cross-doc reuse."}},
+  {id:"FONT8D",zh:"6 月 · 跨脚本字体映射 8D",en:"June · Cross-Script Font Mapping (8D)",date:"2026-06-08 ~ 21",
+   sum:{zh:"6 月体量最大的工程：翻译跨语言时自动换对品牌字体，配缺字预警与假斜体；也是整套自动审计方法的练兵场。",en:"June's largest effort: auto-swap to the right brand fonts when translation crosses languages, with tofu warnings and faux-italic — and the proving ground for the whole automated-audit method."}},
+  {id:"WEIGHT",zh:"字重 epic #15（多 worktree）",en:"Weight Epic #15 (worktrees)", date:"2026-06-21 ~ 24",
+   sum:{zh:"多条 worktree 并行攻中文字重配对——当前最活跃的开发前沿，6 条工作线正待合并。",en:"Parallel worktrees attacking CJK weight pairing — the most active frontier right now, with six lines queuing to merge."}},
+  {id:"NOW",  zh:"当前 · 交付证据 + 跨文档复用",en:"Now · Delivery Evidence + Reuse",date:"2026-06 →",
+   sum:{zh:"收尾管线的终点：把每次定稿存成可追溯的交付证据，并把成果复用给其它文档。",en:"Closing the pipeline's terminus: save each final as traceable delivery evidence, and reuse the result on other documents."}},
+];
+
+/* lanes:[start,end] inclusive = real pipeline coverage. image:null => placeholder ; noImg:true => no screenshot. */
+const ITEMS = [
+ {id:"mvp",phase:"P1",date:"2026-02-13",lanes:[3,3],type:"feature",status:"landed",commit:"e9a0523",repo:"IT",image:"devlog-assets/Screenshot%202026-02-13%20213548.png",
+  title:{zh:"批量文本编辑器 MVP",en:"Batch text-editor MVP"},
+  plain:{zh:"一次把整篇文档的文字批量改好，排版样式自动保住。",en:"Edit a whole document's text in one batch, with formatting kept automatically."},
+  story:{zh:`项目最早要解决的是一件枯燥又费时的事：把整篇文档里的英文逐个文本框换成中文，还不能弄乱原来的字体、字号和样式。手工一个个改，既慢又容易碰坏排版。
+
+第一版工具把它变成「批量收集 → 一次回写」：先把所有文本框的文字和样式信息抓出来集中编辑，改完再精准写回原位，样式自动保留。它本身不复杂，却验证了「结构化提取、再原样写回」这条主路走得通——后面整条管线都建在这块地基上。`,
+   en:`The earliest problem was a tedious, time-consuming one: replacing the English in every text frame with Chinese, without disturbing the original fonts, sizes and styles. Editing frame by frame was slow and easily broke the layout.
+
+The first tool turned this into "collect in bulk, write back at once": pull all the frame text and style data out for central editing, then write it back precisely with styles preserved. Simple in itself, it proved the core path — structured extraction, then faithful write-back — on which the whole later pipeline was built.`}},
+
+ {id:"align",phase:"P2",date:"2026-02-15",lanes:[1,3],type:"feature",status:"archived",commit:"ea822a7",repo:"IT",noImg:true,image:null,
+  title:{zh:"两段式对齐引擎 A+B",en:"Two-stage alignment engine A+B"},
+  plain:{zh:"自动把中文译文对回原文的每一段，连粗体斜体一起搬过去。",en:"Auto-matches each translated paragraph back to its original, carrying bold/italic along."},
+  story:{zh:`自动化的第一个大赌注，是一套两段式对齐：先把 InDesign 里的英文和译前的英文文档对上（同语种，最可靠），再把英文和中文对上（靠结构和数字特征），两段拼起来，就能把中文译文投影回原稿的对应段落，连粗体斜体一起按位置搬过去。
+
+三份真实文档上，它把内容对上了约 89–98%，按词回写成功率 59–73%——单看数字相当能打。但它的可靠性高度依赖文档结构稳定，遇到拆段、合段、漂移就开始猜错。这套引擎最终在一次方向取舍后被封存（见「放弃自动对齐」），但它趟过的坑和指标，为后面的选择提供了底气。`,
+   en:`Automation's first big bet was a two-stage alignment: match the English in InDesign to the pre-translation English document (same language, most reliable), then match English to Chinese (by structure and number patterns); chained together, they projected the Chinese translation back onto the matching source paragraphs, carrying bold and italic across by position.
+
+On three real documents it lined up roughly 89–98% of the content, with 59–73% run-level write-back — strong on paper. But its reliability leaned heavily on stable structure; splits, merges and drift made it guess wrong. The engine was eventually shelved after a change of direction (see "dropping auto-alignment"), but the ground it covered, and its numbers, informed that choice.`}},
+
+ {id:"reorgwizard",phase:"PILOT",date:"2026-02-27",lanes:[4,4],type:"deadend",status:"archived",commit:"97b0d68",repo:"IT",noImg:true,image:null,
+  title:{zh:"样式清理向导（弃用重建）",en:"Style-cleanup wizard (scrapped & rebuilt)"},
+  plain:{zh:"最早的样式清理是个手动三步向导，撤销不稳、面板越堆越大，重做后仍被自动引擎取代。",en:"The first style cleanup was a hands-on three-step wizard; its undo was shaky and the panel kept growing — rebuilt, then superseded by the auto engine."},
+  story:{zh:`样式清理的第一版是个独立的交互向导：聚类、人工映射、应用三步走，专门对付「完全没套样式」的脏文档。它一路加功能，长到单屏工作台、合并单元、逐块导航，到四月时两个向导文件已经膨胀到五十多万字节。
+
+问题不在功能少，而在地基不稳——它的实时预览撤销不可靠，「取消还原」常出错，有一条提交干脆就叫「调试样式清理的取消-还原」。二月底承认这是补丁补不动了，于是写了一份从头重建的计划，第一原则就是「结果可预测、可撤销」，把执行顺序钉死成「先改样式定义 → 再清段落覆盖 → 只重排一次」，当周就切成默认入口。
+
+但这条独立向导路线最终被整体放弃——四月那套零配置、一次 Ctrl+Z 全撤销的自动重组引擎取代了它。留下的判断是：一个半兆字节、还要人逐类确认的面板，不是该继续喂下去的路。它趟过的聚类与角色判定，给后面那套引擎垫了底。`,
+   en:`The first take on style cleanup was a standalone interactive wizard — cluster, map by hand, apply, three steps — aimed at documents with no real styles at all. It kept accreting features into a single-screen workbench with merge units and block-by-block navigation, until by April the two wizard files had bloated past half a million bytes.
+
+The trouble wasn't missing features but a shaky foundation: its live-preview undo was unreliable and "cancel and restore" kept misbehaving — one commit was literally named for debugging that very cancel-restore. By late February that was conceded as un-patchable, so a from-scratch rebuild plan was written whose first principle was "predictable, undoable results," pinning the order to "edit the style definitions → clear paragraph overrides → recompose exactly once." The rebuilt entry shipped that same week.
+
+But the standalone-wizard path was ultimately abandoned outright — April's zero-config engine, fully reversible with one Ctrl+Z, replaced it. The lasting call was recognizing that a half-megabyte panel still asking a human to confirm every cluster was the wrong path to keep feeding. The clustering and role-detection it pioneered gave that later engine its footing.`}},
+
+ {id:"tidpkg",phase:"PILOT",date:"2026-02-19",lanes:[0,0],type:"feature",status:"landed",commit:"a91bbd6",repo:"IT",keystone:true,image:null,
+  title:{zh:"离线翻译包 + tid 稳定 ID",en:"Offline package + stable tid"},
+  plain:{zh:"把一份待翻译的文档打包成译者能离线打开的文件。",en:"Packages a document so translators can open and work on it offline."},
+  story:{zh:`译者要离线工作，就得先把一份 InDesign 文档变成他们打得开、改得动的东西。这一步把原稿导出成一个包：一张预览 PDF、一份按段落整理好文字和版式信息的清单，外加一份待填的译文模板。
+
+关键设计是给每一段都打上一个固定不变的隐形编号，写在文件结构里。有了它，译者改完后回写时不必去猜哪段对哪段，认编号就能精准对位。这套包格式后来一直沿用，正是今天网页工具读取的那套契约。`,
+   en:`For translators to work offline, an InDesign document first had to become something they could open and edit. This step exports the source into a package: a preview PDF, a list of text and layout information organized by paragraph, and a translation template to fill in.
+
+The key design was to stamp every paragraph with a fixed, invisible number written into the file's structure. With it, write-back never has to guess which paragraph is which — matching the number is enough. That package format has stayed in use; it's the very contract the web tool reads today.`}},
+
+ {id:"webproto",phase:"PILOT",date:"2026-02-19",lanes:[2,2],type:"feature",status:"landed",commit:"abd8475",repo:"IT",image:"devlog-assets/Screenshot%202026-02-20%20110358.jpg",
+  title:{zh:"离线译者 App 原型",en:"Offline translator web prototype"},
+  plain:{zh:"译者在浏览器里看着原版 PDF 就能对着改，不用装专业软件。",en:"Translators edit against the original PDF right in a browser, no pro software."},
+  story:{zh:`有了翻译包，还需要一个让译者真正动手的地方——而且不能要求他们装专业排版软件。第一版网页原型就是答案：在浏览器里显示原版 PDF，PDF 上的每段文字都是可点的热区。
+
+点 PDF 上的一段，左边列表自动定位到对应文字；点列表里的一条，PDF 上对应位置随之高亮。这种双向定位让译者对着真实版式改字，所见即所改。这个原型后来独立成了单独的网页项目（见「拆仓」）。`,
+   en:`With a package in hand, translators still needed a place to actually work — one that didn't require professional layout software. The first web prototype was the answer: show the original PDF in a browser, with every paragraph on it a clickable hotspot.
+
+Click a paragraph on the PDF and the list on the left jumps to its text; click a row in the list and the matching spot on the PDF lights up. This two-way locating let translators edit against the real layout, seeing exactly what they changed. The prototype later became its own standalone web project (see "repo split").`}},
+
+ {id:"pivot",phase:"PILOT",date:"2026-02-24",lanes:[0,1],type:"deadend",status:"landed",commit:"9a89e33",repo:"IT",keystone:true,image:null,
+  title:{zh:"放弃自动对齐，转向稳定 ID",en:"Pivot: drop auto-alignment for stable IDs"},
+  plain:{zh:"放弃一套更聪明但不稳的做法，换成更可靠的笨办法。",en:"Dropped a clever-but-shaky approach for a simpler, more reliable one."},
+  story:{zh:`最初的方案很聪明：让程序自动把中文译文和英文原稿一段段对上号——先比对英文原稿和译前英文，再比对英文和中文，靠文字相似度推断每句中文该落在哪一段。但真正的代价在那些程序自己也拿不准、容易对错的句子上：每一句都得有人回头逐句核对，省下的时间又搭了回去。
+
+一个顺手做的小试验改变了方向：与其让程序猜哪段对哪段，不如在导出时给每段文字贴一个固定不变的隐形编号，回写时认编号对位，根本不用猜。对结构没怎么变的文档，这个笨办法更稳。于是更漂亮的那套自动对齐被整套下线封存，方向全部转向贴编号。今天译者用的，正是这条更朴素的支线。`,
+   en:`The first approach was the clever one: have the program line up the Chinese translation with the English source paragraph by paragraph — English source against pre-translation English, then English against Chinese, inferring from text similarity which paragraph each line belonged to. But the real cost was the lines the program couldn't be sure about and easily got wrong: each needing a person to check by hand, which gave back the time it had saved.
+
+A small side experiment changed the direction: rather than guess which paragraph maps to which, give each paragraph a fixed, invisible number at export and match by number on write-back — no guessing. For documents whose structure hadn't changed, the plain method was steadier. So the prettier auto-alignment was shelved wholesale and the effort moved entirely to numbering. What the translators use today is that humbler side-branch.`}},
+
+ {id:"cjkcompose",phase:"UXP",date:"2026-03-07",lanes:[4,4],type:"feature",status:"landed",commit:"3cda901",repo:"IT",keystone:true,image:null,
+  title:{zh:"无中文版 InDesign 也能用中文排版器",en:"CJK typesetting without the Chinese InDesign"},
+  plain:{zh:"团队用英文版 InDesign，本没有中文排版选项；想办法让它照样能自动处理中英间距和标点避头尾。",en:"The team's English InDesign has no Chinese typesetting options; this makes it do the spacing and line-break rules anyway."},
+  story:{zh:`团队用的是英文版 InDesign，可英文版根本没有中文排版需要的那些选项——中文段落书写器、中英文与数字之间的间距规则(Mojikumi)、标点避头尾(Kinsoku)，这些只在中文版里才有。结果就是：译后的中文要么得靠人一个个手动敲空格、手动挪标点，要么干脆排得不对。
+
+突破口来自一次试探：从中文版 InDesign 导出一份配好全套中文排版属性的文档，拿到英文版里打开——发现这些属性照样生效。英文版虽然不能在界面里「设置」它们，却能正常「使用」它们。于是写了个脚本，把这份参考文档里的中文段落样式整套移植进目标文档的每一个段落样式（连表格单元格里的段落也要单独遍历到，否则表格内容永远保持旧排版）。
+
+中文段落就此自动套上正确的书写器、间距和避头尾规则，既不用装中文版 InDesign，也不用再手动加空格。本质上，是把宿主界面不肯给你的能力，藏在一份参考文档的样式里「走私」进来。`,
+   en:`The team works in the English edition of InDesign — which simply has none of the options Chinese typesetting needs: the CJK paragraph composer, the spacing rules between Chinese and Latin or digits (Mojikumi), and the line-start/line-end punctuation rules (Kinsoku). Those exist only in the Chinese edition. So translated Chinese either had spaces typed in by hand and punctuation nudged one piece at a time, or it was simply set wrong.
+
+The breakthrough came from a probe: export a document from the Chinese edition with the full set of CJK composition attributes configured, then open it in the English edition — and find the attributes still take effect. The English edition can't set them through its UI, but it can use them. So a script was written to transplant that reference document's Chinese paragraph styles wholesale into every paragraph style of the target (paragraphs inside table cells had to be walked separately, or table content kept its old typesetting forever).
+
+Chinese paragraphs then get the correct composer, spacing and line-break rules automatically — no Chinese InDesign required, and no more hand-typed spaces. In essence, it smuggles in a capability the host's UI denies you, carried inside a reference document's styles.`}},
+
+ {id:"framerepair",phase:"UXP",date:"2026-03-10",lanes:[5,5],type:"feature",status:"landed",commit:"55d1f31",repo:"IT",keystone:true,image:null,
+  title:{zh:"文本框版面修复引擎",en:"Frame-repair engine"},
+  plain:{zh:"译文变长撑爆文本框后，自动把每段文字调回它原来该在的框里。",en:"After longer translations overflow the frames, auto-restores each paragraph to the frame it originally belonged to."},
+  story:{zh:`英文翻成中文，文字长短全变了。这类文档最难的地方在于：所有文本框不是一个个独立的盒子，整篇是一条连续的文流，串在一个又一个框里。任何一处文字一变长，挤的就不止当前这个框——后面每个框都跟着往后顶，图表锚点错位、整页连锁垮掉。而翻译几乎必然改变长短，几乎每份文档都会这样垮；这一关过不去，整条翻译管线的产出就没法用。它也是整个管线里啃得最久的一块。
+
+难在程序看不到「排版后的样子」，只能反复试——改一点高度、让 InDesign 重排、再看结果。核心是一个忠实度判据：导入前先给每个文本框拍快照，记下它最后一段的全局序号；修复时对每个框的高度做二分搜索，把「最后一段序号」逼回快照里的目标——序号随高度单调变化，二分必然收敛，把每段精准还原回原来的框。普通溢出之外还有四类硬骨头各有专门策略：段落跨框回灌、单行框改用加宽而非增高、图表锚点按边界比对归位、一段文字横跨两框时精确切分。
+
+可靠性靠三层兜底焊死：单步失败就回滚到原始边界、继续修后面的框；整体多跑几遍直到不再有改动；锚点修复若打乱了已修好的边界就整体撤销。一个真实文档上残留问题从三十二个压到三个。（它也踩过一个阴险的坑：修复前那次拍快照一度因写盘失败被悄悄跳过、导致整个修复静默空跑、日志却一切正常，补上建目录那步后同一份文档的溢出从四十九处降到几乎为零。）`,
+   en:`Translating English into Chinese changes every length. The hardest thing about these documents is that the text frames aren't independent boxes: the whole document is one continuous story threaded through frame after frame. So a single paragraph getting longer doesn't overflow just its own box — it shoves everything downstream, every later frame's content shifting back, chart anchors drifting, whole pages cascading out of place. And translation almost always changes length, so nearly every document breaks this way; clear this hurdle or nothing the pipeline produces is usable. It was the longest-fought piece of the whole pipeline.
+
+The catch is that the program can't see the laid-out result — it can only probe: nudge a height, let InDesign reflow, read what happened. The core is a fidelity test: before import it snapshots every frame, recording the global ordinal of its last paragraph; to repair, it binary-searches each frame's height to drive that last-ordinal back to the snapshot's target — the ordinal moves monotonically with height, so the search always converges, restoring every paragraph to its original frame. Beyond plain overflow, four hard cases each get a dedicated strategy: paragraphs spilling across frames, single-line frames widened instead of heightened, chart anchors restored by boundary comparison, and a paragraph straddling two frames split at exactly the right point.
+
+Reliability is welded down by three layers of fallback: a failed step rolls back to the original bounds and moves on; the whole pass repeats until nothing changes; and if anchor repair disturbs an already-fixed boundary it reverts wholesale. On a real document the residual issues fell from thirty-two to three. (It also hit an insidious trap: the pre-repair snapshot once failed to write to disk and was silently skipped, leaving the whole repair quietly doing nothing while the log looked fine — adding a make-directory step dropped oversets in the same document from forty-nine to near zero.)`}},
+
+ {id:"uxp",phase:"UXP",date:"2026-03-07",lanes:[0,6],type:"feature",status:"landed",commit:"d0a47a9",repo:"IT",noImg:true,image:null,
+  title:{zh:"UXP 迁移：.jsx → .idjs",en:"UXP migration: .jsx → .idjs"},
+  plain:{zh:"把工具搬到 Adobe 新一代技术上，免得哪天老技术被淘汰就全废了。",en:"Moved the tools onto Adobe's next-gen tech so they don't rot when the old one dies."},
+  story:{zh:`这套工具原本写在 Adobe 的老脚本技术上，而这门技术随时可能被淘汰——押在一个会消失的地基上，越往后越危险。
+
+于是整套代码被迁到 Adobe 新一代的 UXP 技术上，顺手做了模块化重构，并接上了可编程的自动化桥接。这次迁移不直接产出新功能，却换来了一个面向未来、能异步运行、能被脚本驱动的运行底座；后面所有的管线、操作工具和字体面板都跑在它上面。`,
+   en:`The toolkit was originally written on Adobe's old scripting technology — one that could be retired at any time. Building on a foundation that might disappear only grew riskier over time.
+
+So the whole codebase was moved onto Adobe's next-generation UXP technology, with a modular refactor along the way and a programmable automation bridge wired in. The migration shipped no new feature directly, but it bought a future-proof runtime that runs asynchronously and can be driven by scripts — the base every later pipeline, operator tool and font panel runs on.`}},
+
+ {id:"phase14lib",phase:"P8",date:"2026-04-25",lanes:[1,5],type:"feature",status:"landed",commit:"3302ca8",repo:"IT",image:null,
+  title:{zh:"Phase 1-4 实现骨架（lib 层）",en:"Phase 1-4 implementation backbone (lib layer)"},
+  plain:{zh:"把整条管线拆成可单独测试的核心模块，一次性搭好骨架。",en:"Split the pipeline into independently-testable core modules — the backbone, built in one pass."},
+  story:{zh:`在 Phase 8 那些显眼的强调功能之前，得先有一副骨架：把整条管线拆成一组各司其职、能单独测试的核心模块——版式快照、工作副本、字体映射、样式表构建、段落定位、样式应用、硬错误拦截。
+
+这一层不直接产出炫目的功能，却是后面所有功能真正挂靠的地基。七个模块各自通过 Node 单测、一次性落地，整条管线从此有了可验证的承重结构。`,
+   en:`Before the eye-catching emphasis features of Phase 8, there had to be a skeleton: the whole pipeline split into single-purpose, independently-testable core modules — visual snapshot, work copy, font mapping, style-sheet builder, segment locator, style applier, hard-error guard.
+
+This layer ships no flashy feature, yet it is the foundation everything later actually hangs on. Seven modules, each Node-tested, landed in one pass — giving the pipeline a verifiable load-bearing structure.`}},
+
+ {id:"reorgstyles",phase:"P8",date:"2026-04-27",lanes:[4,5],type:"feature",status:"landed",commit:"8faa091",repo:"IT",keystone:true,image:"devlog-assets/Screenshot%202026-05-09%20164308.png",
+  title:{zh:"段落样式自动重组（聚类·保版式）",en:"Paragraph-style auto-reorganization (clustering, layout-safe)"},
+  plain:{zh:"把一篇满是零散格式的文档，自动归并成一套干净、最少的命名段落样式，且不弄乱版面。",en:"Folds a document full of scattered formatting into one clean, minimal set of named paragraph styles — without disturbing the layout."},
+  story:{zh:`真实文档往往是几百个段落、每段都带着就地随手敲出来的格式覆盖——字号差半磅、行距各不相同、缩进五花八门，却几乎没有真正命名的段落样式。这种文档没法稳定翻译落版：样式定义不可靠，下游每一步都在猜。
+
+这块引擎从一句诉求起步——「能不能不用选文件、也不产出多余文件，就地把样式重组干净？」于是做成零配置、直接改活动文档、整条操作裹进单次撤销（一下 Ctrl+Z 全还原）。它按视觉指纹（字体/字号/颜色/行距/间距/缩进…）把段落聚成一套最小的命名样式，近似重复的自动合并——一份真实文档上，244 个段落被收敛，自动合并把样式从 44 压到 35。聪明之处在「该并的并、不该并的别并」：用稳健统计（MAD/IQR 配高斯核密度估计找字号峰）自动判断哪些字号其实是「同一档」（免得 13.99 和 14.01 被粗暴分到两档），并用松/平衡/严几档容差预设一键调松紧——面板也从十六个复选框的心智负担收成五档预设。
+
+最难的一关不是聚类，而是「并样式不能弄坏版面」。早期一重组页面就肉眼位移：根因是套新样式时清掉了字符级几何覆盖（横向缩放、字距、基线偏移），文字一缩，紧排的框就溢出（母版上一行紧排的网址被直接截断是经典案例）。修法是把这些几何属性烤进新生成的样式定义，并把软换行拆段记成偏移量，让随后的版面修复按正确序号把每段还原回原框。它后来接进了正式导入主线，也成了字体映射面板在进程内复用的同一套引擎。`,
+   en:`A real document is often hundreds of paragraphs, each carrying ad-hoc, typed-in-place overrides — sizes off by half a point, leadings all slightly different, indents every which way — with almost no genuinely named paragraph styles. Such a document can't be translated and laid out reliably: the style definitions are untrustworthy and every downstream step is guessing.
+
+The engine began from one ask — "can we reorganize the styles in place, without picking a file and without producing extra outputs?" So it is zero-config: it edits the active document directly and wraps the whole operation in a single undo (one Ctrl+Z reverts everything). It clusters paragraphs by visual fingerprint (font, size, color, leading, spacing, indents…) into a minimal named set, auto-merging near-duplicates — on a real document, 244 paragraphs were consolidated and the auto-merge took the style count from 44 down to 35. The clever part is "merge what should, keep apart what shouldn't": robust statistics (MAD/IQR with Gaussian kernel-density estimation finding the size peaks) decide which sizes are really "the same tier" (so 13.99 and 14.01 aren't crudely split), with loose / balanced / strict tolerance presets to dial the tightness — and the panel shrank from a sixteen-checkbox mental load to five presets.
+
+The hardest part wasn't the clustering but "merging styles must not break the layout." Early reorganizations visibly shifted the page: applying the new styles cleared character-level geometry overrides (horizontal scale, tracking, baseline shift), so text narrowed until a tightly-set URL on the master truncated outright. The fix was to bake those geometry attributes into the synthesized style definitions, and to record each soft-break split as an offset so the follow-up layout repair could restore every paragraph to its original frame by the correct ordinal. It later wired into the production import path, and became the same engine the font-mapping panel reuses in-process.`}},
+
+ {id:"sbf",phase:"P8",date:"2026-04-27",lanes:[4,4],type:"feature",status:"landed",commit:"cf1f0cb",repo:"IT",image:null,
+  title:{zh:"脚本检测 scriptByFont",en:"Script-by-font detection"},
+  plain:{zh:"中英混排时，中文用中文字体、英文用英文字体，自动分好。",en:"In mixed text, automatically gives Chinese and English their right fonts."},
+  story:{zh:`中英混排有个反复出现的麻烦：一段中文里夹着英文单词或数字，或反过来，得让中文用中文字体、英文用英文字体。靠人一处处挑，既慢又会漏。
+
+这块功能让程序自动识别一段文字里哪部分是中文、哪部分是拉丁字母，再把它们各自路由到对应的字体规则上。它是字体合规自动化的第一块，后面更复杂的跨语言字体映射都接在它后面。`,
+   en:`Mixed Chinese-and-English text had a recurring nuisance: a Chinese passage with an English word or number inside it — or the reverse — needs Chinese to use a Chinese font and Latin to use a Latin one. Picking these out by hand was slow and leaky.
+
+This feature has the program automatically detect which parts of a passage are Chinese and which are Latin, then route each to its proper font rule. It was the first block of font-compliance automation; the more complex cross-language font mapping later built on top of it.`}},
+
+ {id:"emppool",phase:"P8",date:"2026-04-27",lanes:[2,4],type:"feature",status:"landed",commit:"71a8a82",repo:"IT",image:null,
+  title:{zh:"强调字符样式池",en:"Emphasis char-style pool"},
+  plain:{zh:"把文档里所有加粗、斜体、颜色等强调统一收集成一份可复用的清单。",en:"Collects every bold/italic/color emphasis into one reusable list."},
+  story:{zh:`原稿里的加粗、斜体、颜色、字号、上下标、下划线，往往是散落在各处的零碎格式覆盖，难以统一搬运和复用。
+
+这块功能把这些强调从字符级覆盖里提取出来，归整成一份结构化、可复用的样式清单。译者的标注、机器翻译的格式携带、回写时的应用，后来都建立在这份清单上——强调从「散落的覆盖」变成了「能携带的数据」。`,
+   en:`Bold, italic, color, size, super- and subscript, underline in the source were usually scattered, piecemeal character-level overrides — hard to carry and reuse consistently.
+
+This feature lifts those emphases out of the character overrides and organizes them into a structured, reusable list of styles. Translator annotation, machine-translation format carry-over and write-back all later rest on this list — emphasis went from "scattered overrides" to "data that can travel."`}},
+
+ {id:"codec",phase:"P8",date:"2026-04-30",lanes:[1,2],type:"feature",status:"landed",commit:"emphasis_codec.js",repo:"IT",keystone:true,image:null,
+  title:{zh:"强调编解码 codec（AI 翻译保留格式）",en:"Emphasis codec (preserve format through MT)"},
+  plain:{zh:"让机器翻译也能把加粗斜体准确留在对应的词上，不跑偏。",en:"Lets machine translation keep bold/italic on the right words, not drift off."},
+  story:{zh:`早期要把原文的加粗、斜体带到译文上，最直觉的办法是按位置照搬：原文哪几个字是粗的，译文相同位置也加粗。可中英长短差太多——英文「Slide 5:」九个字符，中文「幻灯片5:」只剩六个，照位置一搬，加粗就落到了错的字上，整句变成对不上的乱码。
+
+转念在于：与其翻完再猜位置，不如让加粗跟着词一起走。做法是在送去机器翻译前，给每处强调插一个不起眼的小记号；翻译时记号跟着所标的词一起搬动、重排；翻完取下记号，按它们的落点还原加粗——「幻灯片5:」里加粗的，正好是对应「Slide 5:」的那几个字，而不是死板的前九个。
+
+为稳妥，只有当记号一路顺序不乱、原样返回时才相信这次携带；一旦发现被打乱，宁可不加粗，也不加到错处。它自己的往返与端到端测试共 84 + 24 项断言全部通过；记号被打乱时的健壮性，后来由一个 66 例专项套件兜底锁死。`,
+   en:`To carry the source's bold and italic onto the translation, the intuitive method was to copy by position: whichever characters were bold in the source, bold the same positions in the target. But the languages differ too much in length — English "Slide 5:" is nine characters, Chinese "幻灯片5:" only six, so copying by position put the bold on the wrong characters and turned the line into mismatched nonsense.
+
+The reframe: rather than guess positions after translation, let the bold travel with its word. Before the text goes to machine translation, each emphasis gets a small inconspicuous marker; during translation the markers move and reorder along with the words they tag; afterwards the markers come off and the bold is restored where they landed — the bold in "幻灯片5:" falls on exactly the characters matching "Slide 5:", not a rigid first-nine.
+
+For safety, a carry-over is trusted only when the markers return in order, untouched; if they were scrambled, the bold is dropped rather than misplaced. Its own roundtrip and end-to-end tests (84 + 24 assertions) all pass; robustness against scrambled markers was later locked down by a dedicated 66-case suite.`}},
+
+ {id:"fpaint",phase:"P8",date:"2026-04-30",lanes:[2,2],type:"feature",status:"landed",commit:"8C-FP",repo:"IT",image:"devlog-assets/Screenshot%202026-06-24%20161617.png",
+  title:{zh:"格式刷 UI（format-paint）",en:"Format-paint UI"},
+  plain:{zh:"译者像用格式刷一样，在译文上点一下就标好强调。",en:"Translators mark emphasis with a click, like a format brush."},
+  story:{zh:`译者要在译文上标出哪里该加粗、哪里是斜体，过程得足够顺手——不能让他们去填表格或记快捷键。
+
+这块在网页工具里做了个「格式刷」式的交互：选中一段文字、点一下，强调就标上了，所见即所得。所有标注统一汇进每行的标注数据里，和工具栏、重置、热区、PDF 导出全部打通。它让译者侧的标注体验定了型。`,
+   en:`Translators need to mark where the translation should be bold or italic, and the process has to feel effortless — no forms to fill, no shortcuts to memorize.
+
+This added a "format-brush"-style interaction in the web tool: select a span, click, and the emphasis is marked, exactly as you see it. Every annotation funnels into each row's annotation data, wired through to the toolbar, reset, hotspots and PDF export. It set the shape of the translator-side annotation experience.`}},
+
+ {id:"singledoc",phase:"P8",date:"2026-04-30",lanes:[3,3],type:"retro",status:"landed",commit:"v2_pipeline",repo:"IT",image:null,
+  title:{zh:"14 处溢出查到流程头上",en:"14 oversets traced to the process"},
+  plain:{zh:"查清一个反复出现的排版错位，发现根源其实是流程本身，不是代码。",en:"Traced a recurring layout glitch to the process itself, not the code."},
+  story:{zh:`一份中译英文档跑完整套流程后，日志显示「没有文字溢出」。可一保存、关闭、再打开，InDesign 自检却报出 14 处文字装不下、溢出框外。最初的怀疑都落在刚写的修复代码和新加的字体替换上，却怎么也对不上。
+
+原因在流程本身：程序在后台用一种不弹窗的安静方式运行，字体在这种方式下被悄悄换过；重新打开文档用的是另一种方式，找字体的过程不同，每行字的高度随之变了一点，原本刚好塞下的版面换个状态就装不下了。不是「修得不对」，而是「修的时候和检查的时候，是两套不同的排版状态」。
+
+想清楚后，办法很简单：不再关闭重开，全程在同一个文档、同一种状态里做完，原地保存。14 处溢出一次清零。它留下一条经验——看到的现象不等于背后的原因，找对查问题的方向，比一遍遍硬改更值钱。`,
+   en:`After a Chinese-to-English document finished the whole process, the log read "no text overflow." But once it was saved, closed and reopened, InDesign's self-check reported 14 places where text no longer fit and spilled out of its frame. The first suspects were the new repair code and the new font substitution — neither matched up.
+
+The cause was the process itself: the program ran quietly in the background without pop-ups, and in that mode the fonts were silently swapped; reopening used a different mode whose font lookup worked differently, shifting each line's height just enough that a layout which had just fit no longer did. Not "the fix is wrong," but "the fix and the check happened in two different layout states."
+
+Once that was clear, the fix was simple: stop closing and reopening; do it all in one document, one state, and save in place. The 14 overflows went to zero. The lesson stuck — a symptom is not its cause, and finding the right direction to investigate beats grinding through fix after fix.`}},
+
+ {id:"firstdeliver",phase:"P8",date:"2026-04-29",lanes:[0,6],type:"event",status:"landed",repo:"both",keystone:true,image:null,
+  title:{zh:"第一次交付生产项目",en:"First production delivery"},
+  plain:{zh:"整条管线第一次真正用在一个生产项目上，并交付出去。",en:"The whole pipeline used on a real production project for the first time — and delivered."},
+  story:{zh:`在这之前，所有功能都是在测试文档和样例上验证的。2026 年 4 月 29 日，整条管线第一次真正用在一个生产项目上——从导出、翻译、回写，到排版合规和导出审阅，端到端跑通并交付了出去。
+
+这是从「能演示」到「真出活」的第一步：之前攒下的每一块功能，第一次在一个有真实交付压力的项目里串成完整链路，一起经受检验。`,
+   en:`Until then, every feature had been validated on test documents and samples. On 29 April 2026 the whole pipeline was used on a real production project for the first time — export, translation, write-back, typography compliance and review export running end to end, and delivered.
+
+This was the first step from "it can be demoed" to "it produces real work": every piece built up to that point came together, for the first time, into a complete chain — tested under the pressure of an actual delivery.`}},
+
+ {id:"split",phase:"SPLIT",date:"2026-05-02",lanes:[2,2],type:"feature",status:"landed",commit:"5d662fe",repo:"folio",image:null,
+  title:{zh:"webapp 拆仓 → app-folio",en:"Webapp split → app-folio"},
+  plain:{zh:"把译者用的网页工具独立出来，单独更新、能直接联网打开。",en:"Spun the translator's web tool into its own project, separately shippable."},
+  story:{zh:`译者用的网页工具一直和 InDesign 端的代码挤在同一个仓库里，越长越大，更新和分发都被绑在一起。
+
+这次把网页工具拆成独立的项目，单独维护、单独更新，还能直接挂到网上离线打开，不再背 InDesign 端的包袱。代价是历史被切成两半：早期的网页改动留在原仓库里，新的归到独立仓库——这条分界线本身也成了项目史的一部分。`,
+   en:`The translators' web tool had always been crammed into the same repository as the InDesign-side code; as both grew, updates and distribution stayed tangled together.
+
+This split the web tool into its own project — maintained and shipped on its own, and openable offline straight from the web — free of the InDesign-side weight. The cost was a history cut in two: the early web changes stay in the old repo, the new ones in the standalone one. That dividing line is itself part of the project's story.`}},
+
+ {id:"pdfweight",phase:"SPLIT",date:"2026-05-01",lanes:[0,0],type:"feature",status:"landed",commit:"exportPdf",repo:"IT",image:null,
+  title:{zh:"preview.pdf 字重保留",en:"preview.pdf weight fidelity"},
+  plain:{zh:"修好预览图里粗标题被显示成细体的问题。",en:"Fixed bold titles showing up thin in the preview."},
+  story:{zh:`翻译包里的预览 PDF 出了怪事：原本是粗体的标题，导出后全变成了细体，还跟着报一堆字体缺失。可手动用 InDesign 导同一份文档，却完全正常。
+
+原因藏在一个不起眼的细节里：InDesign 会自动激活原文件旁边那个「文档字体」文件夹里的字体，而导出时用的临时文件被放到了系统临时目录，离开了那个文件夹，字体便找不到、全被替换成了默认体。把临时文件放回原文件同级目录，粗体就回来了。`,
+   en:`The preview PDF in the package did something strange: titles that were bold came out thin after export, trailed by a pile of missing-font warnings. Yet exporting the same document by hand in InDesign was perfectly fine.
+
+The cause hid in an unremarkable detail: InDesign auto-activates the fonts in the "Document fonts" folder sitting next to the source file, but the temp file used for export had been placed in the system temp directory, away from that folder — so the fonts couldn't be found and were all swapped for a default. Putting the temp file back beside the source brought the bold back.`}},
+
+ {id:"softbreak",phase:"SPLIT",date:"2026-05-01",lanes:[2,3],type:"version",status:"landed",commit:"formatAware",repo:"folio",ver:"v2",image:null,
+  title:{zh:"软换行合并（format-aware）",en:"Format-aware soft-break merge"},
+  plain:{zh:"让网页和排版软件对「一句话该不该断行」的判断完全一致。",en:"Makes the web tool and the layout software agree on where a line breaks."},
+  story:{zh:`网页工具和排版软件对「一句话要不要在某处断开」如果判断不一致，就会出错位：网页这边把一张卡拆成了两段，导入那边却没拆，对位就乱了。
+
+这一版让两端用完全相同的标准来判断——字体、字重、字号、颜色四个维度一致才算同一段，并把这个判断结果随每个翻译包一起保存。两端规则严丝合缝，错位的根源也就堵上了。`,
+   en:`If the web tool and the layout software disagreed on whether a sentence should break at a given point, things slipped out of alignment: the web side split a card into two segments while the import side didn't, and the mapping went wrong.
+
+This version had both sides judge by exactly the same standard — same font, weight, size and color across four dimensions counts as one segment — and saved that judgment with each translation package. With the two sides' rules matched precisely, the source of the misalignment was closed off.`}},
+
+ {id:"uxphtml",phase:"SPLIT",date:"2026-05-28",lanes:[3,5],type:"feature",status:"landed",commit:"2751034",repo:"IT",image:"devlog-assets/Screenshot%202026-06-24%20160832.png",
+  title:{zh:"在 InDesign 里渲染 HTML 界面（UXP webview）",en:"Rendering HTML UIs inside InDesign (UXP webview)"},
+  plain:{zh:"用网页技术在 InDesign 脚本里画交互面板，绕开这个阉割版浏览器的种种限制。",en:"Build interactive panels in InDesign scripts with web tech, around a stripped-down browser's many limits."},
+  story:{zh:`InDesign 的 UXP 脚本能用 HTML/CSS 画界面，但跑界面的是一个被大幅阉割的内嵌浏览器：双击脚本时，想显示可见 UI 只有 &lt;dialog&gt; 这一条路；&lt;button&gt; 是坏的原生控件（CSS 和点击都不正常），得全改成 &lt;div role=button&gt;；Canvas、测字、字体查询这些 API 整组被砍；连 React 的事件在弹窗里都不派发。
+
+把字体映射面板、样式重组对话框这些真正的交互界面搬进这个环境，等于一边用网页技术开发、一边逐个踩平这些反直觉的坑。最后沉淀出一套可复用的对话框/面板体系（统一进度、标签点击修复、输出目录选择），让操作工具都有了像样的图形界面。`,
+   en:`InDesign's UXP scripts can draw UI with HTML/CSS, but it runs in a heavily stripped-down embedded browser: when you double-click a script, the only way to show visible UI is a &lt;dialog&gt;; &lt;button&gt; is a broken native widget (its CSS and clicks misbehave), so every one becomes a &lt;div role=button&gt;; Canvas, text-measurement and font-query APIs are all removed; even React's events don't fire inside the modal.
+
+Moving real interactive UIs — the font-mapping panel, the style-reorganize dialog — into this environment meant developing with web tech while flattening each counter-intuitive trap one by one. The result is a reusable dialog/panel system (unified progress, label-click fix, output-folder picking) that gave the operator tools a proper graphical interface.`}},
+
+ {id:"zipsec",phase:"SPLIT",date:"2026-05-27",lanes:[0,2],type:"feature",status:"landed",commit:"304be6b",repo:"folio",image:null,
+  title:{zh:"ZIP 包 I/O + 安全加固",en:"ZIP package I/O + security hardening"},
+  plain:{zh:"整个翻译包能一键打包传递，还挡住了恶意文件。",en:"Whole packages transfer in one click, with malicious-file protection."},
+  story:{zh:`翻译包是一堆文件，逐个传递既麻烦又容易漏。把整包压成一个文件一键传递是自然的需求，但一接收外部文件，就得防着有人塞恶意内容进来。
+
+这块加了整包的打包与读取，并在解压前先检查文件结构，挡住「压缩炸弹」式的恶意包；同时给网页的自动化入口加了一道令牌校验，防止它被外部偷偷调用。工具从「自己玩的原型」迈到了「能交给别人用」的安全门槛上。`,
+   en:`A translation package is a pile of files, awkward and leaky to pass around one by one. Zipping it into a single file for one-click transfer was a natural need — but the moment you accept outside files, you have to guard against someone slipping in malicious content.
+
+This added whole-package zipping and reading, checking the file structure before unzipping to block "zip-bomb"-style malicious packages; it also put a token check on the web tool's automation entry so it couldn't be invoked from outside on the sly. The tool crossed from "a prototype you play with yourself" to a security bar fit for handing to others.`}},
+
+ {id:"cjkwipe",phase:"HARDEN",date:"2026-05-27",lanes:[3,4],type:"retro",status:"landed",commit:"v2_pipeline",repo:"IT",image:null,
+  title:{zh:"二次导入悄悄抹掉中文排版",en:"Re-import silently wiped the Chinese typesetting"},
+  plain:{zh:"查清「改两行字再导入，整篇中文排版全退回默认」的根因，是流程顺序错了。",en:"Root-caused why editing two lines and re-importing reset all the Chinese typesetting — the steps ran in the wrong order."},
+  story:{zh:`一个真实项目里出了件怪事：译者只在网页上改了两行字，把包重新导入后，整篇文档的中文排版——字体、语言、间距、禁则——全部退回了英文默认。之前辛苦配好的一切像没做过一样。最初的怀疑落在刚改的字体替换上，可怎么也对不上。
+
+翻日志才看清真正的顺序：二次导入时，程序先按「英文原稿的快照」把每一段的样式整个重建了一遍，把中文排版属性一并重置成默认；之后那一步「只比对改了哪几行」才跑。也就是说，毁灭发生在比对之前——时间戳铁证如山，重建比比对早了整整九秒。不是哪段代码写错，而是两步的先后顺序本身就错了。
+
+修法是认清这是「编辑模式」：既然只改了几行字，就不该重建样式。编辑模式下整个跳过那次重建，只把改动的文本写回去，其余原样不动。从此每一轮修改都不再吃掉之前的排版工作——这也立成了规矩：任何会改样式定义的工具，都得想清楚二次导入会不会把它抹掉。`,
+   en:`On a real client project something strange happened: a translator changed just two lines in the web tool, re-imported the package, and the document's entire Chinese typesetting — fonts, language, spacing, line-break rules — reverted to the English defaults. Everything carefully configured before was gone, as if never done. The first suspect was the recent font-substitution work, but nothing lined up.
+
+The logs showed the real ordering: on re-import the program first rebuilt every paragraph's style wholesale from a snapshot of the English source, resetting the Chinese composition attributes to defaults along the way; only afterward did the "figure out which lines changed" step run. The destruction happened before the comparison — the timestamps were damning, the rebuild beating the compare by a full nine seconds. Not a line of code written wrong, but the order of two steps wrong in itself.
+
+The fix was to recognize this as "edit mode": if only a few lines changed, the styles shouldn't be rebuilt at all. In edit mode that rebuild is skipped entirely — only the changed text is written back, everything else left untouched. From then on no edit cycle ate the previous typesetting work — and it became a rule: any tool that touches a style definition has to reason about whether a re-import will silently erase it.`}},
+
+ {id:"harden",phase:"HARDEN",date:"2026-05-26",lanes:[3,5],type:"feature",status:"landed",commit:"d06122f",repo:"both",keystone:true,image:null,
+  title:{zh:"实战硬化（17 类 bug）",en:"Campaign hardening (17 bug classes)"},
+  plain:{zh:"在一个真实的大客户项目里，把几十个隐藏毛病一次性修干净。",en:"Ironed out dozens of hidden flaws on a real, large client project."},
+  story:{zh:`一个真实的大客户项目第一次把整条管线推到生产强度，立刻压出了一批平时碰不到的毛病：样式被意外串改、字体在不同访问下表现不一、段落被拆开后旧的引用失效——前后共十七类不同的问题。
+
+逐一修掉这十七类问题的过程，也催生了一组脱离主管线的「操作工具」（换字体、把下划线转成线条、追踪改动等）。这一轮是从「跑得通」到「经得起真项目」的分水岭。`,
+   en:`A real, large client project pushed the whole pipeline to production strength for the first time, and immediately squeezed out a batch of flaws you don't meet in calm conditions: styles accidentally cross-modified, fonts behaving differently under different access, references breaking after paragraphs were split — seventeen distinct classes of problem in all.
+
+Fixing those seventeen one by one also gave rise to a set of "operator tools" standing apart from the main pipeline (swap fonts, turn underlines into rules, track changes). This round was the watershed from "it runs" to "it survives a real project."`}},
+
+ {id:"autopolicy",phase:"HARDEN",date:"2026-05-26",lanes:[0,4],type:"deadend",status:"landed",commit:"BRIDGE-38",repo:"both",noImg:true,image:null,
+  title:{zh:"不自动传播源格式（_auto 政策）",en:"No auto-propagation of source format"},
+  plain:{zh:"定了一条铁律：译者没亲手标的格式，机器绝不擅自加。",en:"Set a rule: the machine never adds formatting the translator didn't mark."},
+  story:{zh:`有一次，程序按链接比例自动给段落上色，结果把译者根本没标注的段落也染了。这暴露出一个原则问题：机器到底该不该自作主张，把原文的格式套到译者没碰过的地方？
+
+定下的规矩是：译者没有亲手标注的格式，机器一律不擅自沿用。所有机器生成的标注都打上一个标记，和人工标注区分开。它禁的是「凭位置和比例去猜」，而不是位置本就忠实的携带。这条规矩横跨两个仓库，后面的几项功能都绕着它来设计。`,
+   en:`On one occasion the program auto-colored paragraphs by link ratio and ended up tinting paragraphs the translator had never marked. That exposed a question of principle: should the machine take it upon itself to apply the source's formatting to places the translator never touched?
+
+The rule set down: any formatting the translator didn't mark by hand, the machine does not carry over on its own. Every machine-generated annotation is flagged to keep it apart from human ones. What it bans is "guessing by position and ratio," not faithful carry-over that was correct to begin with. The rule spans both repositories, and several later features were designed around it.`}},
+
+ {id:"super",phase:"HARDEN",date:"2026-05-27",lanes:[2,2],type:"feature",status:"landed",commit:"c9f7d84",repo:"folio",image:null,
+  title:{zh:"webapp 渲染上/下标",en:"Superscript/subscript in webapp"},
+  plain:{zh:"让脚注里的小上标数字在网页里也能正确显示。",en:"Footnote superscripts now show correctly in the web tool."},
+  story:{zh:`一个脚注末尾的上标小数字「1」，在原稿里明明带着正确的格式，到了网页工具里却怎么也不高亮。
+
+原因是网页这边识别强调时漏了一个维度：InDesign 用一种专门的方式标记原生上标，而旧的判断只认另一种。补上这个维度后，上标终于正确显示，译者看到的和包里的强调数据完全一致。`,
+   en:`A superscript "1" at the end of a footnote carried the right formatting in the source, yet refused to highlight in the web tool.
+
+The reason: the web side was missing one dimension when recognizing emphasis — InDesign marks native superscript in a dedicated way the old check didn't read. With that dimension added, the superscript finally showed, and what the translator sees now matches the package's emphasis data exactly.`}},
+
+ {id:"audit",phase:"HARDEN",date:"2026-05-27",lanes:[0,6],type:"feature",status:"landed",commit:"c8cf5ae",repo:"folio",image:"devlog-assets/Screenshot%202026-02-20%20152735.png",
+  title:{zh:"审计 + 测试基建",en:"Audit + test infrastructure"},
+  plain:{zh:"给每次改动加上自动审查和回归测试，少出看不见的 bug。",en:"Added automated review and regression tests to catch silent bugs."},
+  story:{zh:`改动越来越多，光靠记性和手测，隐性 bug 和回归迟早会漏过去。需要一套不依赖人当场盯着的安全网。
+
+这一轮搭起了一个用两套独立工具交叉审查改动的流程，并把一度全部失效的自动化测试从零重建到全部通过。从此每个改动都要先过一遍新鲜视角的审查再加上真机验证，质量从「靠记性」变成了「靠门槛」。`,
+   en:`As changes piled up, memory and manual testing alone would eventually let silent bugs and regressions slip through. What was needed was a safety net that didn't depend on a person watching in the moment.
+
+This round stood up a process that cross-reviews changes with two independent tools, and rebuilt a once-entirely-broken automated test suite from zero to all-passing. From then on every change passes a fresh-eyed review plus on-device verification first — quality shifted from "by memory" to "by gate."`}},
+
+ {id:"loop",phase:"LOOP",date:"2026-06-01",lanes:[0,6],type:"event",status:"landed",repo:"both",keystone:true,image:null,
+  title:{zh:"全管线闭环（含校对）",en:"Full-pipeline closed loop (with proofing)"},
+  plain:{zh:"第一次走通「二次导出、再导入」的完整往返，整条管线连校对在内形成闭环。",en:"First full 'export-again, re-import' round-trip — the whole pipeline, proofreading included, closed into a loop."},
+  story:{zh:`单向跑通一遍不算真正的工作流——真实项目要反复迭代：译者改、设计回写、导出审阅、再改、再导出。2026 年 6 月 1 日，第一次完整跑通了「二次导出、再导入」的往返，把这条链路真正接成了一个闭环。
+
+关键在于，这一圈把校对也含了进来：导出审阅、收回修改、再回写，不再是一锤子买卖。从这一步起，管线不只是「能把一份文档翻译落版」，而是「能撑住一个要改好几轮的真实项目」。`,
+   en:`Running through once in one direction isn't a real workflow — real projects iterate: the translator edits, the design is written back, a review is exported, more edits come, another export follows. On 1 June 2026 the "export-again, re-import" round-trip ran through in full for the first time, joining the chain into an actual closed loop.
+
+Crucially, this lap included proofreading: export a review, take back the changes, write them in again — no longer a one-shot. From here the pipeline wasn't just "able to translate and lay out a document," but "able to carry a real project through several rounds of revision."`}},
+
+ {id:"meta",phase:"META",date:"2026-06-07",lanes:[6,6],type:"feature",status:"landed",commit:"845d4cd",repo:"folio",noImg:true,image:null,
+  title:{zh:"项目元数据 + 持久化基础",en:"Project meta + persistence base"},
+  plain:{zh:"记住每个项目的语言、译者、截止等信息，给跨文档复用打底。",en:"Remembers each project's language/people/deadline, enabling reuse."},
+  story:{zh:`要让一份译好的成果能复用到别的文档、要支持多个项目长期并存，先得有个可靠的地方记住每个项目是什么——语言、译者、设计师、截止时间，以及它属于哪份原稿。
+
+这块定下了元数据的格式和底层存储，并经过多轮审查把测试从二十多项加固到八十多项。它本身不显眼，却是后面「交付证据系统」的地基。`,
+   en:`For a finished translation to be reusable on other documents, and for many projects to coexist over time, there first had to be a reliable place to remember what each project is — its language, translator, designer, deadline, and which source it belongs to.
+
+This settled the metadata format and the underlying storage, hardened through several review rounds from twenty-odd tests to over eighty. Unremarkable on its own, it's the foundation of the later "delivery-evidence system."`}},
+
+ {id:"idbcas",phase:"META",date:"2026-06-15",lanes:[2,2],type:"feature",status:"landed",commit:"67a3916",repo:"folio",image:null,
+  title:{zh:"工作态持久化 + 角色 modal",en:"Work-state persistence + roles modal"},
+  plain:{zh:"译者的活随时自动存，崩溃重开也不丢，切项目不串味。",en:"Auto-saves the translator's work; survives crashes, safe to switch projects."},
+  story:{zh:`译者的工作以前只活在当前这一次会话里——浏览器一崩、标签一关，没保存的改动就没了。对一份要改几个钟头的文档来说，这种风险不可接受。
+
+这块给网页工具加了可靠的本地保存：改动随时存下、重开自动恢复，原始状态完整留底，多个标签页同时打开也不会互相覆盖；切换项目时彼此隔离、不串味。译者端从「会话级的临时草稿」变成了「靠得住的工作台」。`,
+   en:`A translator's work used to live only in the current session — one browser crash or closed tab and any unsaved edits were gone. For a document that takes hours, that risk was unacceptable.
+
+This gave the web tool reliable local saving: edits are stored continuously and restored on reopen, the original state is kept intact, and multiple open tabs don't overwrite each other; switching projects keeps them isolated. The front-end went from "a session-scoped scratch draft" to "a dependable workbench."`}},
+
+ {id:"cjkfont",phase:"FONT8D",date:"2026-06-14",lanes:[4,5],type:"feature",status:"landed",commit:"49339f1",repo:"IT",image:null,
+  title:{zh:"中文字体落空修复（brand-CJK 注入）",en:"Brand-CJK injection (fixing the silent CJK no-op)"},
+  plain:{zh:"修好换字体时中文段落被悄悄换成了通用黑体、而不是品牌中文字体的问题。",en:"Fixed Chinese text quietly getting a generic font instead of the brand's Chinese font."},
+  story:{zh:`换字体的环节本该把中文段落换成品牌指定的中文字体，可实测下来几乎没生效：一份中文译稿里，七千多个汉字被悄悄定型成了一种通用黑体（思源黑体），只有一百多个字换对——基本等于没换。
+
+根因藏在两步顺序里。前一步「重建样式」会先把每一段中文都强制套上那种通用黑体；后一步「按源字体换字」是照着原来的字体去找该换成谁的，可这时中文早被改成通用黑体了，源字体对不上，于是一个都不换。两步各自看都没错，合在一起却互相抵消。更绕的是，第一版对根因的判断也是错的，后来才纠正过来——真正作怪的是「整段重建」那一步，不是先前怀疑的强调格式兜底。
+
+定位清楚后，办法很干净：在重建之前，把品牌中文字体插到候选字体链的最前面，让「重建」和「换字」对齐到同一个目标。这块逻辑做成了一个不依赖排版软件、能单独测的纯函数，接进了两条导入主线，中文字体这才真正落到品牌字体上。`,
+   en:`The font-swap step was supposed to give Chinese paragraphs the brand's designated Chinese font, but in practice it barely did anything: in one Chinese translation, over seven thousand characters were quietly set to a generic font (Source Han Sans) and only a hundred-odd were swapped correctly — essentially a no-op.
+
+The cause hid in an ordering. An earlier "rebuild styles" step force-applied that generic font to every Chinese paragraph; the later "swap by source font" step looked up each run by its original font to decide the replacement — but by then the Chinese had already become the generic font, so nothing matched and nothing swapped. Each step was fine alone; together they cancelled out. Trickier still, the first read of the root cause was itself wrong and had to be corrected — the real culprit was the whole-paragraph rebuild, not the emphasis-fallback first suspected.
+
+Once pinned, the fix was clean: before the rebuild, put the brand Chinese font at the front of the candidate chain so "rebuild" and "swap" aim at the same target. The logic became a pure, independently-testable function wired into both import paths — and the Chinese text finally landed on the brand font.`}},
+
+ {id:"font8d",phase:"FONT8D",date:"2026-06-12",lanes:[3,5],type:"feature",status:"landed",commit:"8D-ext",repo:"IT",image:"devlog-assets/Screenshot%202026-06-24%20153324.png",
+  title:{zh:"跨脚本字体映射 8D-ext",en:"Cross-script font mapping (8D-ext)"},
+  plain:{zh:"翻译跨语言时，自动把每段文字换成目标语言该用的品牌字体。",en:"When translation crosses languages, auto-swaps each run to the brand font the target language should use."},
+  story:{zh:`翻译会跨语言：英文版式翻成中文，原本的拉丁字体在中文下要换成中文品牌字体，反过来也一样。早先的脚本检测只能处理「源文里本就混排」的情况，对「翻译后才跨脚本」无能为力。
+
+8D-ext 在导入阶段按字符的脚本（中文 / 拉丁 / 数字）逐段把字体换成目标语言的品牌字体，并配上反向兜底规则。这是 6 月体量最大的一块工程，也是整套自动审计方法的练兵场——其中一条子线经历了长达 26 轮的对抗式审计才收敛。`,
+   en:`Translation crosses languages: an English layout becomes Chinese, and the original Latin fonts must become Chinese brand fonts under Chinese text — and vice versa. The earlier script detection only handled text already mixed in the source; it was helpless when the script change came from the translation.
+
+8D-ext, at import time, swaps each run's font to the target language's brand font by character script (CJK / Latin / digit), with reverse fallback rules. It was the single largest effort of June, and the proving ground for the whole automated-audit method — one of its sub-lines took a 26-round adversarial audit to converge.`}},
+
+ {id:"bypair",phase:"FONT8D",date:"2026-06-20",lanes:[4,4],type:"feature",status:"landed",commit:"8b3f3bf",repo:"IT",image:null,
+  title:{zh:"缺字(豆腐)早预警 UX",en:"Missing-glyph (tofu) early-warning UX"},
+  plain:{zh:"换字体后若有字显示不出来，提前弹窗提示，而不是默默丢掉。",en:"If a swap leaves characters that can't render, it warns up front instead of silently dropping them."},
+  story:{zh:`换字体有个隐患：换上的字体可能缺某些字，渲染出来是一个个空白方块——「豆腐」。早先的流程是跑到最后才发现，然后默默 block、关文档、删产物，等于白跑一趟三十秒到几分钟。
+
+这块把它改成交互式：管线开跑前就扫一遍、发现源里自带的缺字字体就预警；末尾真碰到豆腐时弹窗让人选「加配对 / 接受 / 取消」，而不是闷头失败。判断用的是同一套规则，干净的源零误报。`,
+   en:`Swapping fonts has a hidden hazard: the new font may lack some glyphs, rendering them as little empty boxes — "tofu." The old flow only found this at the very end, then silently blocked, closed the document and deleted its output — a wasted thirty-second-to-several-minute run.
+
+This made it interactive: scan before the pipeline starts and warn about missing-glyph fonts already in the source; when tofu actually appears at the end, pop a dialog to choose "add a pairing / accept / cancel" instead of failing in silence. The same rule drives the check, so a clean source raises zero false alarms.`}},
+
+ {id:"fauxitalic",phase:"FONT8D",date:"2026-06-15",lanes:[4,4],type:"feature",status:"landed",commit:"656678b",repo:"IT",image:null,
+  title:{zh:"假斜体 / 真斜体保真",en:"Faux-italic / italic fidelity"},
+  plain:{zh:"字体没有斜体时自动「斜」出来；有真斜体时绝不降级。",en:"Synthesizes a slant when a font has no italic; never downgrades a real one."},
+  story:{zh:`有些字体根本没有斜体字形，中文尤其如此。要表达斜体强调，就得用倾斜变换「假斜」出来。难点在分寸：该假斜的假斜，但混在中文里、本就有真斜体的拉丁字必须用真的，绝不能被一刀切降级成假斜。
+
+这块把判断收口到一处、在五个调用点统一处理；真机上还抓出两个只在宿主里才暴露的 UXP bug（一个字体身份比较的死循环、一个把真斜体静默降级的读取错误）——单测和 mock 都漏掉，只有真机端到端跑才现形。`,
+   en:`Some fonts have no italic glyphs at all — Chinese especially. To show italic emphasis, you synthesize a slant via a skew transform. The tricky part is judgment: faux-slant what needs it, but a genuine italic Latin word mixed inside Chinese must use the real italic and never be flattened to faux.
+
+This consolidated the decision into one place across five call sites; on the real host it also caught two UXP bugs that only surface in the host (a font-identity comparison that looped forever, and a read error that silently downgraded real italic) — both missed by unit tests and mocks, visible only on an end-to-end host run.`}},
+
+ {id:"epic",phase:"WEIGHT",date:"2026-06-22",lanes:[4,4],type:"feature",status:"landed",commit:"TODO#15",repo:"IT",keystone:true,image:null,
+  title:{zh:"字重映射 epic #15",en:"CJK weight-mapping epic #15"},
+  plain:{zh:"让中文标题、正文用对品牌规定的粗细搭配。",en:"Gets Chinese titles and body onto the brand's required weights."},
+  story:{zh:`中文品牌规范要求固定的字重搭配——什么标题用什么粗细，正文用什么粗细，都有定数。要让译后的中文标题、正文都落在规定的字重上，并不只是「加粗」那么简单。
+
+这是一块大工程，用多条并行的开发分支同时推进字重配对的各个角落。它本身是个总纲，下面挂着多条工作线（部分见同一阶段的其它卡片），各条收口后一并合入主线落地。`,
+   en:`Chinese brand guidelines call for fixed weight pairings — which weight a title takes, which the body takes, all specified. Getting translated Chinese titles and body onto the prescribed weights is not as simple as "make it bold."
+
+This was a large effort that advanced the corners of weight pairing across several parallel development branches at once. It's the umbrella; multiple work-lines hung beneath it (some shown as the other cards in this stage), and once each closed they merged into the main line together.`}},
+
+ {id:"autogate",phase:"WEIGHT",date:"2026-06-22",lanes:[0,4],type:"feature",status:"landed",commit:"34603f5",repo:"IT",noImg:true,image:null,
+  title:{zh:"canonical _auto gate",en:"Canonical _auto gate"},
+  plain:{zh:"把那条「不擅自加格式」的铁律落实到所有处理环节。",en:"Enforces the 'no unmarked formatting' rule on every processing path."},
+  story:{zh:`「机器不擅自加格式」这条规矩，原本只在一条处理路径上把关；可程序里应用格式的路径不止一条，只挡一条，其余几条照样会漏。
+
+这块把这道关卡统一收口到全部应用路径上，做成单一的权威把关点（其中第 5 条 apply 路径 runMinimalApply 由后续补上）。其余分支里各自重复的同类把关，都会并到它这里。`,
+   en:`The "machine doesn't add formatting on its own" rule originally guarded only one processing path; but there's more than one path that applies formatting, and guarding just one leaves the others leaking.
+
+This consolidated the gate across the apply paths into a single authoritative checkpoint (the 5th path, runMinimalApply, came in a follow-up). The duplicated versions of the same gate scattered across other branches all fold into it.`}},
+
+ {id:"cjkweight",phase:"WEIGHT",date:"2026-06-22",lanes:[4,4],type:"feature",status:"landed",commit:"257b383",repo:"IT",keystone:true,image:null,
+  title:{zh:"pair 权威 CJK 字重",en:"Pair-authoritative CJK weight"},
+  plain:{zh:"修好中文标题字重「莫名低一档」的问题。",en:"Fixes Chinese titles silently coming out one weight too light."},
+  story:{zh:`中文标题反复出现一个症状：字重莫名其妙低了一档，或者悄悄被降级，看起来就是不够粗。
+
+查下来，根子在于强调的字重没有走品牌规定的固定搭配，而是被另一套排序逻辑覆盖了。这条线把字重的权威来源锁定在品牌搭配上，连带修了正文英文、软断标题、空白行等几处相邻的问题，并在真机上验证通过。它是字重大工程的主体，已合入主线。`,
+   en:`Chinese titles kept showing one symptom: the weight came out a notch too light, or was quietly downgraded — it simply looked not bold enough.
+
+The root was that emphasis weight wasn't following the brand's fixed pairing but was being overridden by a separate ranking logic. This line locks the authoritative source of weight to the brand pairing, fixing several adjacent issues along the way (body English, soft-broken titles, blank lines) and verified on-device. It's the body of the weight effort, now merged into the main line.`}},
+
+ {id:"emphstyle",phase:"WEIGHT",date:"2026-06-24",lanes:[4,4],type:"version",status:"landed",commit:"9ee7b1f",repo:"IT",ver:"⊃ cjkweight",keystone:true,image:null,
+  title:{zh:"忠实强调 → 字符样式重构",en:"Faithful emphasis → char-style refactor"},
+  plain:{zh:"把忠实保留的强调彻底理顺成一套干净规则。",en:"Cleaned faithful emphasis into one tidy rule set."},
+  story:{zh:`在字重那条线的基础上，还剩一组同根的问题：忠实保留下来的强调，散在好几处规则里，彼此打架——直接覆盖压过了样式、中文斜体被误当成字重处理、一道旧的关卡盖过了强调。
+
+这条线把忠实强调彻底收拢进同一套按语言区分的字符样式里，逐个修掉这些根因。它是字重大工程里改动最多的一条前沿，收口后随整套工程合入主线落地。`,
+   en:`Building on the weight line, a cluster of same-root problems remained: faithfully-kept emphasis was scattered across several rules that fought each other — a direct override smothering the style, Chinese italic mistaken for weight, an old gate overriding the emphasis.
+
+This line gathers faithful emphasis into one per-language set of character styles, fixing those root causes one at a time. It was the most-changed frontier of the weight effort, and once closed it merged into the main line with the rest.`}},
+
+ {id:"mtcarry",phase:"WEIGHT",date:"2026-06-23",lanes:[1,2],type:"feature",status:"landed",commit:"c085b4f",repo:"folio",image:null,
+  title:{zh:"MT-携带 faithful 旗",en:"MT-carry faithful flag"},
+  plain:{zh:"区分「可信的格式」和「猜的格式」，只放行可信的。",en:"Separates trustworthy formatting from guessed, passing only the trustworthy."},
+  story:{zh:`「不擅自加格式」的规矩有个副作用：机器翻译时那套「让加粗跟着词走」的记号机制，明明把强调准确地带了回来，却也被一刀切地当成「机器猜的」给剥掉了。
+
+这条线加了一个标记，把「可信的忠实携带」和「凭启发式猜的」区分开，只放行前者。它只在记号确认一路没被打乱时才授予信任，实测六十多次往返全部干净。原来那种一刀切剥掉的处理就此退役，可信的记号携带得以保留，靠这枚区分可信与否的标记放行。`,
+   en:`The "no unmarked formatting" rule had a side effect: the marker mechanism that lets bold follow the word through machine translation brought the emphasis back accurately, yet was being stripped wholesale as "a machine guess."
+
+This line added a flag separating "trustworthy faithful carry-over" from "heuristic guess," passing only the former. Trust is granted only when the markers are confirmed unscrambled all the way through — over sixty round-trips tested came back clean. The old wholesale stripping was retired in its wake; the trustworthy marker carry stayed, passed through by the flag that tells trustworthy from not.`}},
+
+ {id:"empconfirm",phase:"WEIGHT",date:"2026-06-24",lanes:[2,2],type:"deadend",status:"landed",commit:"36d36ce",repo:"folio",noImg:true,image:null,
+  title:{zh:"弃用「译者逐条确认强调」",en:"Dropped: translator confirms each emphasis"},
+  plain:{zh:"做过一版「机器建议、译者点确认」的强调，两天后整套撤掉。",en:"Built a 'machine suggests, translator confirms' emphasis flow, then pulled it two days later."},
+  story:{zh:`最初这条线是为了补一个缺口：「不擅自加格式」挡住了机器自作主张，可机器其实常常判断得对，难道每个强调都要译者手动重画一遍？于是做了一版折中——机器把强调作为「建议」给出，译者点一下确认，建议才正式生效。既守住「人说了算」，又省掉重复劳动。
+
+两天后，一条产品边界把它否掉了：格式应当跟着翻译自动走，可信地带过来、自动落位；带错了算缺陷，在管线里修，不该让译者去审。译者的精力只留给内容。按这条边界，让译者逐条确认强调，等于又把格式的活儿推回给译者，正好相悖——于是这套确认中转连同它的猜测逻辑整个撤掉。留下的是两条干净通道：可信携带的自动传播，和给手动译文的手动标注。这段弯路本身有用：它把「格式归管线、内容归译者」这条责任线试明白了。`,
+   en:`This line began by filling a gap: the "no unmarked formatting" rule stopped the machine from acting on its own, yet the machine often judged emphasis correctly — must a translator redraw every one by hand? So a middle path was built: the machine offered emphasis as a "suggestion," the translator clicked to confirm, and only then did it take effect. It kept "the human decides" while sparing the repeated work.
+
+Two days later a product boundary overruled it: format should ride along with the translation automatically — carried over faithfully, landing on its own; if it comes over wrong, that's a defect to fix in the pipeline, not something a translator should review. A translator's effort is reserved for content. Under that line, asking a translator to confirm each emphasis simply pushed format work back onto them — the exact contradiction — so the confirm step and its guessing logic were removed wholesale. What remains are two clean channels: automatic propagation of faithful carry-over, and manual annotation for hand-entered text. The detour earned its keep: it was what made the responsibility line — format to the pipeline, content to the translator — clear.`}},
+
+ {id:"delivery",phase:"NOW",date:"2026-06",lanes:[6,6],type:"feature",status:"active",commit:"P0",repo:"folio",image:null,
+  title:{zh:"交付证据系统 + 跨文档复用",en:"Delivery-evidence system + cross-doc reuse"},
+  plain:{zh:"把每次定稿存成不可改的凭证，还能把成果套用到别的文档。",en:"Saves each final as tamper-proof evidence, and reuses it on other docs."},
+  story:{zh:`网页工具的定位是多轮翻译、同语言更新的工具——每一次定稿导出，都是一次正式交付，得有据可查、改不得。更进一步，一份译好的成果还应该能套用到别的文档上。
+
+这块在搭这条管线的终点：把每次定稿存成不可改动的凭证，按内容指纹比对版本之间逐段的差异，并用一个人工优先的文档库把成果复用给其它文档。它就是「成果复用给其它文档」这个目标的落点，方案已通过评审、待实现。`,
+   en:`The web tool is positioned as a tool for multi-round translation and same-language updates — every finalized export is a formal delivery that must be on the record and tamper-proof. Further, a finished translation should be reusable on other documents.
+
+This builds the pipeline's terminus: save each final as an unalterable record, compare versions paragraph by paragraph via content fingerprints, and reuse results across documents through a manual-first document library. It's where the "reuse results on other documents" goal lands — the plan reviewed and approved, awaiting implementation.`}},
+
+ {id:"derisk",phase:"NOW",date:"2026-06",lanes:[6,6],type:"retro",status:"landed",commit:"verdict",repo:"folio",noImg:true,image:null,
+  title:{zh:"de-risk 裁决：两条诱人的路被证伪",en:"De-risk: two tempting paths disproved"},
+  plain:{zh:"动手前先用实验否决两条看着诱人却不靠谱的路。",en:"Killed two tempting-but-unreliable paths by experiment before building."},
+  story:{zh:`在动手实现交付系统之前，有两条看着诱人的路先被实验否决了。第一条：用那套隐形编号来跨版本追踪段落——可实测它在真实包上几乎全军覆没（近乎一个都没保住），文档重开后关联还会丢。第二条：让程序按内容相似度自动把文档归类——实测同样不靠谱。
+
+于是段落比对改用更稳的内容指纹，归类则退回「人工优先」。这一步没产出功能，却把交付系统的设计风险提前清空——先证伪、再立项，省下的是日后返工的代价。`,
+   en:`Before building the delivery system, two tempting paths were killed by experiment first. One: use the invisible numbering to track paragraphs across versions — but in testing it failed almost entirely on real packages (next to none retained), and the links were lost after a reopen. Two: have the program auto-classify documents by content similarity — equally unreliable in testing.
+
+So paragraph comparison switched to sturdier content fingerprints, and classification fell back to "manual first." The step shipped no feature, but it cleared the delivery system's design risk up front — disprove first, then commit — sparing the cost of rework later.`}},
+];
+
+/* ============================ render ============================ */
+let LANG = localStorage.getItem("devlog_lang") || "en";
+let ACTIVE = new Set(Object.keys(TYPES));
+const T = o => (o && (o[LANG] ?? o.zh)) || "";
+
+function setLang(l){ LANG=l; localStorage.setItem("devlog_lang",l); document.documentElement.lang=l; render(); }
+function heatColor(v,max){ if(v==null) return "#1a2029"; const a=.18+.82*(v/max); return `rgba(247,201,72,${a.toFixed(2)})`; }
+
+function renderChrome(){
+  document.getElementById("h-title").textContent = T(STR.title);
+  document.getElementById("h-sub").textContent = T(STR.sub);
+  document.getElementById("foot").textContent = T(STR.foot);
+  document.getElementById("lang-zh").classList.toggle("on",LANG==="zh");
+  document.getElementById("lang-en").classList.toggle("on",LANG==="en");
+
+  document.getElementById("link-webapp").textContent = T(STR.webapp);
+  const lg = document.getElementById("legend"); lg.innerHTML="";
+  for(const [k,v] of Object.entries(TYPES)){
+    const el=document.createElement("span");
+    el.className="chip"+(ACTIVE.has(k)?"":" off");
+    el.innerHTML=`<span class="dot" style="background:${v.c}"></span>${T(v)}`;
+    el.onclick=()=>{ ACTIVE.has(k)?ACTIVE.delete(k):ACTIVE.add(k); render(); };
+    lg.appendChild(el);
+  }
+  const ksHint=document.createElement("span");
+  ksHint.className="chip"; ksHint.style.cursor="default";
+  ksHint.innerHTML=`<span class="kbadge" style="margin:0">◆</span>${T(STR.keystone)}`;
+  lg.appendChild(ksHint);
+  const months=["02","03","04","05","06"];
+  const cmb=m=>(HEAT.IT[m]||0)+(HEAT.folio[m]||0);
+  const maxC=Math.max(...months.map(cmb));
+  const cells=months.map(m=>{const v=cmb(m);return `<div class="hcell" title="2026-${m}: ${v}" style="background:${heatColor(v,maxC)}">${v}</div>`}).join("");
+  document.getElementById("heat").innerHTML = `<span>${LANG==="zh"?"提交强度":"commit intensity"}</span><div class="heatgrid">${cells}</div>`;
+
+  const pl=document.getElementById("pipeline"); pl.innerHTML="";
+  LANES.forEach(l=>{ const d=document.createElement("div"); d.className="lanehead";
+    d.innerHTML=`<div class="n">${l.n}</div><div class="t">${T(l)}</div><div class="tip">${T(l.desc)}</div>`; pl.appendChild(d); });
+}
+
+function packRows(items){
+  const sorted=[...items].sort((a,b)=> a.lanes[0]-b.lanes[0] || (b.lanes[1]-b.lanes[0])-(a.lanes[1]-a.lanes[0]));
+  const rows=[];
+  sorted.forEach(it=>{
+    let row = rows.find(r=> it.lanes[0] > r.end);
+    if(row){ row.items.push(it); row.end=it.lanes[1]; }
+    else rows.push({end:it.lanes[1], items:[it]});
+  });
+  return rows.map(r=>r.items);
+}
+
+function cardEl(it){
+  const el=document.createElement("div");
+  el.className="card t-"+it.type+(it.keystone?" keystone":"");
+  el.style.gridColumn = `${it.lanes[0]+1} / ${it.lanes[1]+2}`;
+  const ty=TYPES[it.type], st=STATUS[it.status];
+  const badge=st?`<span class="badge ${st.cls}">${T(st)}</span>`:"";
+  const ver=it.ver?`<span class="tag ver">${it.ver}</span>`:"";
+  const hash=it.commit?`<span class="tag hash">${it.commit}</span>`:"";
+  const kb=it.keystone?`<span class="kbadge">◆ ${T(STR.keystone)}</span>`:"";
+  const thumb=it.image?`<div class="cthumb"><img src="${it.image}" alt="" loading="lazy" draggable="false"></div>`:"";
+  el.innerHTML=`<span class="tpill" style="--tc:${ty.c}"><span class="d"></span>${T(ty)}</span>
+    <div class="ct">${T(it.title)}</div>
+    <div class="cp">${T(it.plain)}</div>
+    ${thumb}
+    <div class="crow">${badge}${kb}${ver}${hash}</div>`;
+  el.onclick=()=>openModal(it);
+  return el;
+}
+
+function render(){
+  renderChrome();
+  const root=document.getElementById("phases"); root.innerHTML="";
+  PHASES.forEach(ph=>{
+    const items=ITEMS.filter(i=>i.phase===ph.id && ACTIVE.has(i.type));
+    if(!items.length) return;
+    const sec=document.createElement("section"); sec.className="phase";
+    sec.innerHTML=`<div class="phase-head"><span class="lbl">${T(ph)}</span><span class="dt">${ph.date}</span><span class="ln"></span></div><div class="phase-sum">${T(ph.sum)}</div>`;
+    packRows(items).forEach(rowItems=>{
+      const row=document.createElement("div"); row.className="lane-row";
+      rowItems.forEach(it=>row.appendChild(cardEl(it)));
+      sec.appendChild(row);
+    });
+    root.appendChild(sec);
+  });
+}
+
+function imgPanel(it){
+  return `<img src="${it.image}" alt="" draggable="false">`;
+}
+function storyHTML(it){
+  return T(it.story).split(/\n\s*\n/).map(p=>`<p>${p.trim()}</p>`).join("");
+}
+function openModal(it){
+  const st=STATUS[it.status], ty=TYPES[it.type];
+  const lanes = it.lanes[0]===it.lanes[1] ? `${LANES[it.lanes[0]].n} · ${T(LANES[it.lanes[0]])}`
+    : `${LANES[it.lanes[0]].n}–${LANES[it.lanes[1]].n}`;
+  const meta=[
+    `<span class="tag" style="color:${ty.c};border-color:${ty.c}">${T(ty)}</span>`,
+    st?`<span class="badge ${st.cls}">${T(st)}</span>`:"",
+    it.ver?`<span class="tag ver">${it.ver}</span>`:"",
+    `<span class="tag">${lanes}</span>`,
+    `<span class="tag" style="color:var(--probe)">${it.repo}</span>`,
+  ].join("");
+  const modal=document.getElementById("modal");
+  modal.classList.toggle("solo", !it.image);
+  const img = it.image ? `<div class="mImg">${imgPanel(it)}</div>` : "";
+  modal.innerHTML=`
+    ${img}
+    <div class="mBody">
+      <button class="mclose" onclick="closeModal()">&times;</button>
+      <div class="dline">${it.date}${it.commit?" · "+T(STR.commit)+" "+it.commit:""}</div>
+      <div class="ct">${T(it.title)}</div>
+      <div class="dmeta">${meta}</div>
+      <div class="story">${storyHTML(it)}</div>
+    </div>`;
+  document.getElementById("scrim").classList.add("on");
+}
+function closeModal(){ document.getElementById("scrim").classList.remove("on"); }
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeModal(); });
+
+render();
+
+/* ---- drag-to-pan canvas; items stay clickable (only a real drag suppresses the click) ---- */
+(function(){
+  const canvas=document.getElementById("canvas");
+  let drag=null, moved=false;
+  canvas.addEventListener("pointerdown",e=>{
+    if(e.button) return;                         // left button / touch only
+    drag={x:e.clientX,y:e.clientY,sl:canvas.scrollLeft,st:canvas.scrollTop};
+    moved=false;
+    canvas.classList.add("dragging");
+  });
+  window.addEventListener("pointermove",e=>{
+    if(!drag) return;
+    const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
+    if(Math.abs(dx)+Math.abs(dy)>5) moved=true;
+    canvas.scrollLeft=drag.sl-dx;
+    canvas.scrollTop =drag.st-dy;
+  });
+  function end(){ if(drag){ drag=null; canvas.classList.remove("dragging"); } }
+  window.addEventListener("pointerup",end);
+  window.addEventListener("pointercancel",end);
+  // a drag ends with a click event — swallow it so the item under the cursor doesn't open
+  canvas.addEventListener("click",e=>{ if(moved){ e.stopPropagation(); e.preventDefault(); moved=false; } },true);
+})();
+</script>
+</body>
+</html>
