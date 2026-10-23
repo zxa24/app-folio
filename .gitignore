@@ -1,0 +1,75 @@
+# === OS / IDE / sync ===
+.DS_Store
+Thumbs.db
+desktop.ini
+.claude/
+.stfolder/
+.stfolder.*
+.scratch/
+*.ffs_db
+*.sync-conflict-*
+
+# === Internal / dev (kept locally, never published) ===
+mac.txt
+DEV_LOG.md
+TEST_CHECKLIST.md
+dev/
+**/dev/
+
+# === Internal docs (historical/design notes) ===
+docs/manual_hotspot_plan.md
+docs/source_emphasis_rendering.md
+
+# === Tests (contain customer-name fixtures) ===
+tests/
+
+# === Logs / cache / packaging ===
+*.log
+*.zip
+__pycache__/
+*.pyc
+*.pyo
+node_modules/
+
+# === Probe / scratchpad scripts ===
+probe_*.js
+*_probe.js
+debug_*.js
+.tmp_*
+
+# === MCP browser tool traces (Playwright MCP server output) ===
+.playwright-mcp/
+
+# === Binary assets not currently used by webapp ===
+# (vendor/ fonts intentionally NOT ignored — webapp depends on them)
+*.indd
+*.idml
+*.ai
+*.psd
+
+# === Internal orchestration / dev-process docs (private — never published) ===
+CLAUDE.md
+_ledger.md
+design-intent.md
+task_plan.md
+phase_graph.md
+plan_cleanup_checklist.md
+fixtures/
+# package.json/-lock are a dev-only conformance-test harness (not webapp runtime) — kept private with the tests
+package.json
+package-lock.json
+# (customer-name leakage guards moved to .git/info/exclude — local-only, not published)
+
+# === Audit artifacts (codex-audit skill output) ===
+audit-logs/
+*.merged.jsonl
+
+# === Session transcript exports (session-extract skill — kept long-term, never tracked) ===
+session-extract/
+
+# === Dev-log showcase (docs/pipeline-devlog.html) — PUBLIC via GitHub Pages ===
+# Public showcase images live in docs/devlog-assets/ (curated + scrubbed, tracked).
+# docs/dev-pics/ is the raw private screenshot dump (secrets / client material / paths) — ignore it ENTIRELY, no exceptions.
+docs/dev-pics/
+# internal build spec (contains client name / internal detail) — keep local, not public
+docs/pipeline-devlog-build.md
